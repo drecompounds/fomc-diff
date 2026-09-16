@@ -76,7 +76,7 @@ fomc-diff/
     quantifiers.py       graded-hedge counts from minutes
     macro.py             FRED via keyless fredgraph.csv
     reaction.py          2:00 ET -> close move
-    annotate.py          captions; opt-in, never in CI
+    annotate.py          export/verify for captions; never in CI
     cli.py
   tests/  notebooks/  charts/
   .github/workflows/refresh.yml
@@ -247,7 +247,7 @@ without it.
 | 3 | Manifest SHA re-check on a sample | the Fed silently editing a published document |
 | 4 | `"almost all participants"` fixture yields `almost_all=1, all=0` | the substring trap |
 | 5 | Mutating `turn_rules.yaml` must change the output | proves the config has a real reader; a config check that passes without one is vacuous |
-| 6 | `--annotate` off leaves all other tables byte-identical | annotation cannot contaminate the deterministic spine |
+| 6 | A full annotation pass leaves every table except `annotations.csv` byte-identical | annotation cannot contaminate the deterministic spine |
 | 7 | A caption citing a number absent from its todo row fails `verify` | fabricated or stale figures, regardless of what the author read |
 
 ## Failure modes
