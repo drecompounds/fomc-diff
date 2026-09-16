@@ -1,6 +1,9 @@
+import json
 import hashlib
+import os
+from datetime import datetime, timezone
 from pathlib import Path
-from fomc_diff.fetch import fetch, NonTextContentError
+from fomc_diff.fetch import fetch, NonTextContentError, CacheCollisionError
 import pytest
 
 HTML = "<html><body><p>hello</p></body></html>"
@@ -36,26 +39,61 @@ def test_second_fetch_uses_cache_and_makes_no_request(tmp_path: Path):
     assert s.calls == 1, "cache hit must not issue a second request"
 
 def test_fetching_twice_returns_same_fetched_at(tmp_path: Path):
+    """A cache hit must read fetched_at from the sidecar, not call
+    datetime.now(). Proven by forcing the sidecar to a fixed, clearly-old
+    timestamp that datetime.now() could never coincidentally produce, then
+    asserting the returned value matches it exactly."""
     s = FakeSession()
     r1 = fetch("https://example.gov/a.htm", tmp_path, session=s, sleep=lambda _: None)
+
+    fixed = "2020-01-01T00:00:00+00:00"
+    meta_path = r1.path.with_suffix(r1.path.suffix + ".meta.json")
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["fetched_at"] = fixed
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
     r2 = fetch("https://example.gov/a.htm", tmp_path, session=s, sleep=lambda _: None)
-    assert r1.fetched_at == r2.fetched_at, "fetched_at should be stable across cache hits"
+    assert r2.fetched_at == fixed, (
+        "cache hit must return the sidecar's fetched_at verbatim, not datetime.now()"
+    )
 
 def test_cache_hit_with_deleted_sidecar_uses_mtime(tmp_path: Path):
+    """With no sidecar, fetched_at must be derived from the cached file's
+    mtime, not datetime.now(). Proven by setting the file's mtime to a
+    fixed, clearly-old timestamp and asserting the returned value equals
+    that exact mtime-derived ISO string."""
     s = FakeSession()
     r1 = fetch("https://example.gov/a.htm", tmp_path, session=s, sleep=lambda _: None)
 
-    # Delete the sidecar to simulate older cache
+    # Delete the sidecar to force the mtime fallback path.
     meta_path = r1.path.with_suffix(r1.path.suffix + ".meta.json")
-    if meta_path.exists():
-        meta_path.unlink()
+    meta_path.unlink()
 
-    # Fetch again, should return stable timestamp from mtime (not now())
+    fixed_dt = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    fixed_epoch = fixed_dt.timestamp()
+    os.utime(r1.path, (fixed_epoch, fixed_epoch))
+
     r2 = fetch("https://example.gov/a.htm", tmp_path, session=s, sleep=lambda _: None)
     assert r2.from_cache is True
-    assert r2.fetched_at is not None
-    # Both should have timestamps, and they should not be drastically different (mtime-based)
-    assert r2.fetched_at  # Should have a value
+    expected = fixed_dt.isoformat(timespec="seconds")
+    assert r2.fetched_at == expected, (
+        "mtime-fallback path must derive fetched_at from the file's mtime, "
+        "not datetime.now()"
+    )
+
+def test_cache_collision_raises_on_url_mismatch(tmp_path: Path):
+    s = FakeSession()
+    r1 = fetch("https://example.gov/a.htm", tmp_path, session=s, sleep=lambda _: None)
+
+    meta_path = r1.path.with_suffix(r1.path.suffix + ".meta.json")
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["url"] = "https://other.gov/a.htm"
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+    with pytest.raises(CacheCollisionError) as exc_info:
+        fetch("https://example.gov/a.htm", tmp_path, session=s, sleep=lambda _: None)
+    assert "https://example.gov/a.htm" in str(exc_info.value)
+    assert "https://other.gov/a.htm" in str(exc_info.value)
 
 def test_pdf_content_type_raises_error(tmp_path: Path):
     class PdfResponse:
@@ -74,3 +112,18 @@ def test_pdf_content_type_raises_error(tmp_path: Path):
     # Verify no file was written
     cache_file = tmp_path / "doc.pdf"
     assert not cache_file.exists()
+
+def test_missing_content_type_raises_error(tmp_path: Path):
+    """An absent Content-Type header must be treated as unknown (rejected),
+    not trusted as text."""
+    class NoContentTypeResponse:
+        status_code = 200
+        text = HTML
+        content = HTML.encode("utf-8")
+        headers = {}
+        def raise_for_status(self): pass
+
+    s = FakeSession(response=NoContentTypeResponse())
+    with pytest.raises(NonTextContentError):
+        fetch("https://example.gov/b.htm", tmp_path, session=s, sleep=lambda _: None)
+    assert not (tmp_path / "b.htm").exists()
