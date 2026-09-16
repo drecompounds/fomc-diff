@@ -19,7 +19,7 @@ def test_june_has_four_body_paragraphs():
 def test_roles_assigned_by_anchor_not_position():
     paras = parse_statement(_html("statement_20260729.html"))
     assert [p.role for p in paras] == [
-        "vote", "policy", "economy", "inflation", "dissent"]
+        "vote", "policy", "economy", "inflation", "vote_against"]
 
 def test_no_unclassified_paragraphs_in_either_fixture():
     for name in ("statement_20260729.html", "statement_20260617.html"):
@@ -40,7 +40,7 @@ def test_boilerplate_is_dropped():
     ("Inflation remains elevated relative to the Committee's 2 percent goal.",
      "inflation"),
     ("Voting against the monetary policy action were Beth M. Hammack.",
-     "dissent"),
+     "vote_against"),
     ("The Committee went bowling.", "unclassified"),
 ])
 def test_role_for(text, expected):
@@ -132,3 +132,39 @@ def test_html_comments_do_not_leak_into_paragraph_text():
         for p in parse_statement(_html(name)):
             assert "-->" not in p.text, f"{name}: comment residue in {p.text[:60]!r}"
             assert "<!--" not in p.text
+
+
+def test_combined_voting_paragraph_is_a_vote_not_a_policy_paragraph():
+    """2019-09-18 puts 'Voting for' and 'Voting against' in ONE paragraph, and
+    that paragraph contains 'target range for the federal funds rate' because
+    Bullard's preferred alternative names it. Tagged policy, it collides with
+    the real policy paragraph and the dissent is never seen."""
+    paras = parse_statement(_html("statement_20190918.html"))
+    voting = [p for p in paras if p.text.startswith("Voting")]
+    assert len(voting) == 1
+    assert voting[0].role == "vote_for"
+    assert all(p.role != "policy" for p in voting)
+
+
+def test_split_voting_paragraphs_get_distinct_roles():
+    """2020-09-16 splits them into two paragraphs. One role for both would
+    produce a duplicate and break role-aligned diffing."""
+    roles = [p.role for p in parse_statement(_html("statement_20200916.html"))
+             if p.text.startswith("Voting")]
+    assert roles == ["vote_for", "vote_against"]
+
+
+def test_2026_standalone_dissent_is_vote_against():
+    roles = [p.role for p in parse_statement(_html("statement_20260729.html"))]
+    assert "vote_against" in roles
+
+
+def test_no_duplicate_vote_roles_anywhere_in_the_fixtures():
+    import collections
+    for name in ("statement_20190918.html", "statement_20200916.html",
+                 "statement_20211215.html", "statement_20250917.html",
+                 "statement_20160316.html", "statement_20260729.html"):
+        counts = collections.Counter(
+            p.role for p in parse_statement(_html(name)))
+        assert counts["vote_for"] <= 1, name
+        assert counts["vote_against"] <= 1, name

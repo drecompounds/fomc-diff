@@ -114,12 +114,18 @@ def _strip_boilerplate(text: str) -> str:
 
 def role_for(text: str) -> str:
     # The vote-announcement line ("...approved the following statement for
-    # release by a 9-3 vote:") is where parse_vote reads the count. It was
-    # invisible until the release-line boilerplate stopped swallowing it.
+    # release by a 9-3 vote:") is where parse_vote reads the count.
     if "approved the following statement for release" in text:
         return "vote"
+    # BOTH vote checks MUST precede `policy`. In 2016-2025 the voting paragraph
+    # contains "target range for the federal funds rate", because the
+    # dissenter's preferred alternative names it -- so `policy` would swallow
+    # the entire vote record. This is the same trap that already required
+    # dissent-before-policy; its scope was simply too narrow.
+    if text.startswith("Voting for"):
+        return "vote_for"
     if text.startswith("Voting against"):
-        return "dissent"
+        return "vote_against"
     if "target range for the federal funds rate" in text:
         return "policy"
     if text.startswith("Inflation"):

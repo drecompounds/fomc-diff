@@ -29,8 +29,8 @@ def test_golden_june_to_july_2026():
     assert by_role["economy"].change_type == "unchanged"
     assert by_role["inflation"].change_type == "unchanged"
 
-    assert by_role["dissent"].change_type == "added"
-    assert "Hammack" in by_role["dissent"].word_diff
+    assert by_role["vote_against"].change_type == "added"
+    assert "Hammack" in by_role["vote_against"].word_diff
 
 def test_unchanged_rows_have_zero_word_counts():
     rows = diff_statements(_paras("statement_20260617.html"),
