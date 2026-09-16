@@ -454,7 +454,7 @@ git commit -m "Split vote roles and check them before policy"
 
 **Context:** 34 documents carry two paragraphs containing "target range for the federal funds rate": the decision, and the reaction function ("In determining the timing and size of future adjustments to..."). They are different paragraphs, not duplicates. `policy` must require a decision verb.
 
-The literal substring `"Committee decided to"` is NOT sufficient — 2020-03-03 reads "decided **today** to lower". Use a regex.
+Use a regex `Committee decided\s+(?:today\s+)?to` for whitespace robustness. **Note:** an earlier version of this plan claimed the literal substring `"Committee decided to"` misses 2020-03-03's "decided today to lower". That is false — "to" is a prefix of "today", so the literal matches coincidentally. Do not write a disable-proof asserting otherwise; it cannot go red.
 
 **This task carries the one open design question in the spec: the `economy` anchor.** Its wording varies ("Information received since the Federal Open Market Committee met in...", "Recent indicators suggest that...", "Indicators of economic activity and employment...", "Available indicators suggest..."). Too loose and it collides with other paragraphs; too tight and it misses eras. Steps 3-4 iterate until Step 5's two corpus-level tests pass. Those tests are the gate, not a guess made up front.
 

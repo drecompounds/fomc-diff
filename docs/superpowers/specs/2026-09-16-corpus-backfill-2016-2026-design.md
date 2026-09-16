@@ -194,10 +194,19 @@ Separate from the vote collision, 34 documents carry two paragraphs containing
   to **the target range for the federal funds rate**, the Committee will
   assess..."
 
-**Fix.** `policy` requires a decision verb as well as the phrase, as a regex —
-`Committee decided (today )?to` — because the literal substring "Committee
-decided to" misses 2020-03-03's "decided **today** to lower". The
+**Fix.** `policy` requires a decision verb as well as the phrase, and the
 reaction-function paragraph takes the `guidance` role.
+
+**Correction.** An earlier draft of this spec justified using a regex by
+claiming the literal substring "Committee decided to" misses 2020-03-03's
+"decided **today** to lower". That is **false**: "to" is a prefix of "today",
+so the literal matches by coincidence. The original probe showed 2020-03-03
+yielding no `policy` paragraph because Defect 1 was deleting that paragraph
+outright — a Defect 1 symptom misattributed to the anchor.
+
+The regex `Committee decided\s+(?:today\s+)?to` is kept for whitespace
+robustness, not because the literal fails here, and the test covering it is
+named for what it actually guards.
 
 Because `policy` becomes strictly narrower, an era phrasing the decision
 differently produces zero `policy` paragraphs rather than a wrong one, and that

@@ -183,9 +183,22 @@ def test_reaction_function_is_guidance_not_a_second_policy_paragraph():
     assert any(p.role == "guidance" for p in paras)
 
 
-def test_decided_today_still_counts_as_a_decision():
-    """2020-03-03 reads 'decided TODAY to lower'. A literal 'Committee decided
-    to' substring misses the emergency 50bp cut entirely."""
+def test_emergency_cut_yields_exactly_one_policy_paragraph():
+    """2020-03-03, the emergency 50bp cut, must produce one policy paragraph
+    carrying the decision.
+
+    This test does NOT discriminate the _DECIDED regex from a literal
+    "Committee decided to" substring, and an earlier docstring wrongly claimed
+    it did: "to" is a prefix of "today", so the literal matches
+    "decided today to lower" by coincidence. What this guards is that the
+    decision paragraph EXISTS and is tagged policy -- it goes red if the
+    boilerplate filter starts eating it again (the original Defect 1) or if the
+    policy anchor stops matching altogether.
+
+    The regex is kept for whitespace robustness ("decided
+ to"), not because
+    the literal fails on this fixture.
+    """
     paras = parse_statement(_html("statement_20200303.html"))
     policy = [p for p in paras if p.role == "policy"]
     assert len(policy) == 1
