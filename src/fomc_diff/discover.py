@@ -8,6 +8,7 @@ what the Fed labelled as a statement.
 """
 from __future__ import annotations
 
+import collections
 import html as _html
 import re
 from datetime import date
@@ -71,13 +72,42 @@ def statement_links(html: str) -> dict[date, str]:
     return out
 
 
-# Task 2 functions (stubs for now)
+# Task 2: Corpus assembly and count guard
+
+FIRST_YEAR = 2016
+LAST_HISTORICAL_YEAR = 2020   # 2021+ live on fomccalendars.htm
+MIN_MEETINGS_PER_YEAR = 8
+
 
 def listing_urls(through_year: int) -> list[str]:
-    """Generate the list of Fed listing page URLs to fetch."""
-    raise NotImplementedError()
+    urls = [f"{BASE}/monetarypolicy/fomchistorical{y}.htm"
+            for y in range(FIRST_YEAR, LAST_HISTORICAL_YEAR + 1)]
+    if through_year > LAST_HISTORICAL_YEAR:
+        urls.append(f"{BASE}/monetarypolicy/fomccalendars.htm")
+    return urls
 
 
 def build_corpus(pages: dict[str, str], current_year: int) -> dict[date, str]:
-    """Merge every listing page into one date-to-URL map, and sanity-check it."""
-    raise NotImplementedError()
+    """Merge every listing page into one date-to-URL map, and sanity-check it.
+
+    `pages` maps an identifier to already-fetched HTML, so this stays offline.
+    """
+    corpus: dict[date, str] = {}
+    for html in pages.values():
+        for d, url in statement_links(html).items():
+            corpus.setdefault(d, url)
+    if not corpus:
+        raise DiscoveryError(
+            "no statements discovered; the listing pages are the single point "
+            "of failure for the backfill and must never yield an empty corpus")
+
+    per_year = collections.Counter(d.year for d in corpus)
+    for year, n in sorted(per_year.items()):
+        if year >= current_year:
+            continue          # in progress, incomplete by definition
+        if n < MIN_MEETINGS_PER_YEAR:
+            raise DiscoveryError(
+                f"{year} yielded only {n} statements; the FOMC holds at least "
+                f"{MIN_MEETINGS_PER_YEAR} scheduled meetings a year, so the "
+                "listing page shape has probably changed")
+    return corpus
