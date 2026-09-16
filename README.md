@@ -111,13 +111,19 @@ or removed paragraphs are facts the Fed prints. They are read directly.
 | `diffing.py` | Role-aligned paragraph and word diffs. |
 | `quantifiers.py` | Graded hedge counts from minutes ("a few" / "several" / "most" participants). |
 | `phrases.py` | First and last appearance of tracked phrases across the corpus. |
+| `sep.py` | Summary of Economic Projections (the dot-plot tables): medians, central tendency and range per variable per horizon, plus release-to-release deltas. |
 | `tables.py` | CSV writers that refuse to write an empty table. |
 
 Design and implementation notes live in `docs/superpowers/`.
 
 ## Status
 
-Working: the corpus engine above, 65 tests, three real statements as fixtures.
+Working: the corpus engine above, 79 tests, three real statements and two real
+projections tables as fixtures.
+
+On 2026-09-16 the projections module found the actual news of that meeting: the
+median 2027 federal funds projection rose from 3.6% to 4.1% in a single quarter,
+while unemployment projections *fell*. The statement's prose barely moved.
 
 Not built yet:
 
@@ -129,6 +135,7 @@ Not built yet:
   several paragraphs, which currently raises `DuplicateRoleError` by design
 - FRED macro join, to measure how long the Committee's language lags the data
 - Charts and the annotation layer
+- Individual participant dots (this module reads the summary table, not the chart)
 
 ## Data and licensing
 
