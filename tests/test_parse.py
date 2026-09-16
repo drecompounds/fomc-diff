@@ -1,7 +1,9 @@
 import collections
 from pathlib import Path
 import pytest
-from fomc_diff.parse import extract_paragraphs, role_for, parse_statement, ArticleContainerError
+from fomc_diff.parse import (
+    extract_paragraphs, role_for, parse_statement, ArticleContainerError,
+    _opens_with_economic_assessment)
 
 FIX = Path(__file__).parent / "fixtures"
 UNIQUE_ROLES = ("policy", "economy", "inflation", "vote_for", "vote_against")
@@ -235,3 +237,33 @@ def test_recurring_paragraphs_are_all_classified():
                 openings[p.text[:55]] += 1
     recurring = {t: n for t, n in openings.items() if n >= 5}
     assert not recurring, f"recurring unclassified paragraphs: {recurring}"
+
+
+def test_every_statement_with_a_decision_has_an_economy_paragraph():
+    """The prior gates checked that roles never duplicate and that recurring
+    paragraphs are classified. Neither asserts the economy role EXISTS, so an
+    anchor matching nothing satisfied both -- on 22 of the 89 real statements.
+
+    Two documented exemptions, both by condition rather than by filename:
+      - Desk directives carry no economic assessment at all.
+      - A statement that FUSES its assessment and its decision into one
+        paragraph (2020-03-03) can only express one role for it, and `policy`
+        wins because the decision is the more load-bearing fact.
+    """
+    for f in sorted(FIX.glob("statement_*.html")):
+        paras = parse_statement(f.read_text(encoding="utf-8"))
+        roles = [p.role for p in paras]
+        if "directive" in roles:
+            continue
+        policy = next((p for p in paras if p.role == "policy"), None)
+        if policy is not None and _opens_with_economic_assessment(policy.text):
+            continue          # fused paragraph; see docstring
+        assert roles.count("economy") == 1, f"{f.name}: {roles}"
+
+
+def test_the_fused_paragraph_exemption_is_narrow():
+    """The exemption must require BOTH conditions. A statement whose policy
+    paragraph does not open with an assessment gets no free pass."""
+    paras = parse_statement(_html("statement_20250917.html"))
+    policy = next(p for p in paras if p.role == "policy")
+    assert not _opens_with_economic_assessment(policy.text)

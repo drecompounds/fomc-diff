@@ -26,18 +26,31 @@ _DIRECTS = re.compile(r"directs the Desk", re.I)
 # `"economic activity" in text` mints duplicate `economy` roles there.
 _ECONOMY_OPENINGS = (
     "Information received since the Federal Open Market Committee met in",
-    "Recent indicators suggest that economic activity",
-    "Recent indicators point to modest growth",
-    "Indicators of economic activity and employment",
-    "Available indicators suggest that economic activity",
-    "Economic activity is expanding",
-    "Economic activity expanded at a modest pace",
+    "Recent indicators",
+    "Indicators of economic activity",
+    "Available indicators suggest",
     "Economic activity",
-    "Although swings in net exports have affected the data, recent indicators",
-    "Although overall economic activity edged down in the first quarter",
-    "Overall economic activity appears to have picked up",
-    "The fundamentals of the U.S. economy remain strong",
+    "Although swings in net exports",
+    "Although overall economic activity",
+    "Overall economic activity",
+    "The fundamentals of the U.S. economy",
+    "The coronavirus outbreak is causing",
+    "The COVID-19 pandemic is causing",
+    "With progress on vaccinations",
 )
+
+
+def _opens_with_economic_assessment(text: str) -> bool:
+    """True when `text` opens with one of the Fed's recurring economic-
+    assessment phrasings.
+
+    A single source of truth for "is this paragraph the opening economic
+    assessment" -- `role_for` uses it to assign `economy`, and the fused-
+    paragraph exemption in the test suite (a statement like 2020-03-03, whose
+    `policy` paragraph absorbs the assessment because the two are welded into
+    one <p>) uses it too. Two copies of this list would drift.
+    """
+    return text.startswith(_ECONOMY_OPENINGS)
 
 # The Fed glues its release line -- and the "Share" widget -- onto the FRONT of
 # the first body paragraph. In 86 of the 89 statements from 2016-2026 the
@@ -165,7 +178,7 @@ def role_for(text: str) -> str:
         return "mandate"
     if "reinvest" in text or "holdings of Treasury securities" in text:
         return "balance_sheet"
-    if text.startswith(_ECONOMY_OPENINGS):
+    if _opens_with_economic_assessment(text):
         return "economy"
     if text.startswith("Inflation"):
         return "inflation"
