@@ -1,6 +1,6 @@
 from pathlib import Path
 import pytest
-from fomc_diff.parse import extract_paragraphs, role_for, parse_statement
+from fomc_diff.parse import extract_paragraphs, role_for, parse_statement, ArticleContainerError
 
 FIX = Path(__file__).parent / "fixtures"
 
@@ -42,3 +42,35 @@ def test_boilerplate_is_dropped():
 ])
 def test_role_for(text, expected):
     assert role_for(text) == expected
+
+def test_missing_article_container_raises_error():
+    html_without_article = "<html><body><p>Some text</p></body></html>"
+    with pytest.raises(ArticleContainerError) as exc_info:
+        extract_paragraphs(html_without_article)
+    assert "Article container not found" in str(exc_info.value)
+    assert "unrecognised" in str(exc_info.value)
+
+def test_unterminated_article_container_raises_error():
+    html_unterminated = '<div id="article"><p>Some text</p>'
+    with pytest.raises(ArticleContainerError) as exc_info:
+        extract_paragraphs(html_unterminated)
+    assert "Article container unterminated" in str(exc_info.value)
+    assert "no matching closing tag" in str(exc_info.value)
+
+def test_error_messages_are_different():
+    html_missing = "<html><body><p>Some text</p></body></html>"
+    html_unterminated = '<div id="article"><p>Some text</p>'
+
+    try:
+        extract_paragraphs(html_missing)
+    except ArticleContainerError as e:
+        missing_msg = str(e)
+
+    try:
+        extract_paragraphs(html_unterminated)
+    except ArticleContainerError as e:
+        unterminated_msg = str(e)
+
+    assert missing_msg != unterminated_msg
+    assert "not found" in missing_msg
+    assert "unterminated" in unterminated_msg

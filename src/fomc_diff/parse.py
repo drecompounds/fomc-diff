@@ -20,6 +20,11 @@ _DROP_PREFIXES = (
 )
 
 
+class ArticleContainerError(ValueError):
+    """Raised when HTML article container is missing or malformed."""
+    pass
+
+
 @dataclass(frozen=True)
 class Paragraph:
     index: int
@@ -32,28 +37,36 @@ def extract_paragraphs(html: str) -> list[str]:
     # Extract only from the article div to avoid header/footer/nav boilerplate
     article_start = html.find('<div id="article">')
     if article_start == -1:
-        # Fallback: extract from entire HTML if article div not found
-        article_html = html
-    else:
-        # Find the matching closing </div> for the article container
-        depth = 1
-        pos = article_start + len('<div id="article">')
-        while depth > 0 and pos < len(html):
-            next_open = html.find('<div', pos)
-            next_close = html.find('</div>', pos)
-            if next_close == -1:
+        raise ArticleContainerError(
+            "Article container not found: page structure is unrecognised "
+            "(expected <div id=\"article\">)"
+        )
+
+    # Find the matching closing </div> for the article container.
+    # Note: assumes well-formed input; does not account for <div in comments/strings.
+    depth = 1
+    pos = article_start + len('<div id="article">')
+    article_html = None
+    while depth > 0 and pos < len(html):
+        next_open = html.find('<div', pos)
+        next_close = html.find('</div>', pos)
+        if next_close == -1:
+            break
+        if next_open == -1 or next_close < next_open:
+            depth -= 1
+            if depth == 0:
+                article_html = html[article_start:next_close + len('</div>')]
                 break
-            if next_open == -1 or next_close < next_open:
-                depth -= 1
-                if depth == 0:
-                    article_html = html[article_start:next_close + len('</div>')]
-                    break
-                pos = next_close + len('</div>')
-            else:
-                depth += 1
-                pos = next_open + len('<div')
+            pos = next_close + len('</div>')
         else:
-            article_html = html
+            depth += 1
+            pos = next_open + len('<div')
+
+    if article_html is None:
+        raise ArticleContainerError(
+            "Article container unterminated: no matching closing tag found for "
+            "<div id=\"article\">"
+        )
 
     out: list[str] = []
     for raw in _P.findall(article_html):
