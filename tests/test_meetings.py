@@ -10,6 +10,7 @@ def _html(name): return (FIX / name).read_text(encoding="utf-8")
 
 @pytest.mark.parametrize("s,expected", [
     ("3-1/2", 3.5), ("3-3/4", 3.75), ("5", 5.0), ("0-1/4", 0.25),
+    ("1/4", 0.25), ("3/4", 0.75),
 ])
 def test_parse_fraction(s, expected):
     assert parse_fraction(s) == expected
@@ -22,6 +23,16 @@ def test_parse_target_range():
     text = ("The Committee decided to maintain the target range for the federal "
             "funds rate at 3-1/2 to 3-3/4 percent, in support of the dual mandate.")
     assert parse_target_range(text) == (3.5, 3.75)
+
+def test_parse_target_range_zirp_era_bare_fraction_from_zero():
+    text = ("The Committee decided to maintain the target range for the "
+            "federal funds rate at 0 to 1/4 percent.")
+    assert parse_target_range(text) == (0.0, 0.25)
+
+def test_parse_target_range_zirp_era_bare_fraction_to_bare_fraction():
+    text = ("The Committee decided to maintain the target range for the "
+            "federal funds rate at 1/4 to 1/2 percent.")
+    assert parse_target_range(text) == (0.25, 0.5)
 
 def test_parse_dissent_names_and_direction():
     text = ("Voting against the monetary policy action were Beth M. Hammack, "
