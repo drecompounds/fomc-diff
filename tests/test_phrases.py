@@ -27,3 +27,9 @@ def test_dates_are_sorted_regardless_of_dict_order():
     rows = {r.phrase: r for r in phrase_index(shuffled, ["solid pace"])}
     assert rows["solid pace"].first_seen == "2026-06-17"
     assert rows["solid pace"].last_seen == "2026-07-29"
+
+def test_case_insensitive_phrase_matching():
+    """Tracked phrase in different case must still match document text."""
+    rows = {r.phrase: r for r in phrase_index(BY_DATE, ["SOLID PACE"])}
+    assert rows["SOLID PACE"].first_seen == "2026-06-17"
+    assert rows["SOLID PACE"].n_meetings == 2
