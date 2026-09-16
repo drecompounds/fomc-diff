@@ -16,6 +16,29 @@ _WS = re.compile(r"\s+")
 
 _DATE_LINE = re.compile(r"^[A-Z][a-z]+ \d{1,2}, \d{4}$")
 
+# "decided to" is not enough: 2020-03-03 reads "decided TODAY to lower".
+_DECIDED = re.compile(r"Committee\s+decided\s+(?:today\s+)?to", re.I)
+_DIRECTS = re.compile(r"directs the Desk", re.I)
+
+# The opening economic-assessment paragraph, matched as a START-of-paragraph
+# anchor rather than a loose substring: "economic activity" also appears
+# inside the reaction-function/outlook paragraphs on 9 fixtures, so a bare
+# `"economic activity" in text` mints duplicate `economy` roles there.
+_ECONOMY_OPENINGS = (
+    "Information received since the Federal Open Market Committee met in",
+    "Recent indicators suggest that economic activity",
+    "Recent indicators point to modest growth",
+    "Indicators of economic activity and employment",
+    "Available indicators suggest that economic activity",
+    "Economic activity is expanding",
+    "Economic activity expanded at a modest pace",
+    "Economic activity",
+    "Although swings in net exports have affected the data, recent indicators",
+    "Although overall economic activity edged down in the first quarter",
+    "Overall economic activity appears to have picked up",
+    "The fundamentals of the U.S. economy remain strong",
+)
+
 # The Fed glues its release line -- and the "Share" widget -- onto the FRONT of
 # the first body paragraph. In 86 of the 89 statements from 2016-2026 the
 # opening economic assessment lives inside that same <p>, and on 2020-03-03 the
@@ -126,12 +149,26 @@ def role_for(text: str) -> str:
         return "vote_for"
     if text.startswith("Voting against"):
         return "vote_against"
-    if "target range for the federal funds rate" in text:
+    if _DECIDED.search(text) and "target range for the federal funds rate" in text:
         return "policy"
+    if _DIRECTS.search(text):
+        return "directive"
+    if ("In determining the timing and size of future adjustments" in text
+            or "In assessing the appropriate stance of monetary policy" in text):
+        return "guidance"
+    if "path of the economy" in text:
+        return "outlook_risk"
+    if "committed to using its full range of tools" in text:
+        return "commitment"
+    if ("seeks to achieve maximum employment" in text
+            or "Consistent with its statutory mandate" in text):
+        return "mandate"
+    if "reinvest" in text or "holdings of Treasury securities" in text:
+        return "balance_sheet"
+    if text.startswith(_ECONOMY_OPENINGS):
+        return "economy"
     if text.startswith("Inflation"):
         return "inflation"
-    if "Economic activity" in text:
-        return "economy"
     return "unclassified"
 
 

@@ -1,8 +1,10 @@
+import collections
 from pathlib import Path
 import pytest
 from fomc_diff.parse import extract_paragraphs, role_for, parse_statement, ArticleContainerError
 
 FIX = Path(__file__).parent / "fixtures"
+UNIQUE_ROLES = ("policy", "economy", "inflation", "vote_for", "vote_against")
 
 def _html(name): return (FIX / name).read_text(encoding="utf-8")
 
@@ -168,3 +170,55 @@ def test_no_duplicate_vote_roles_anywhere_in_the_fixtures():
             p.role for p in parse_statement(_html(name)))
         assert counts["vote_for"] <= 1, name
         assert counts["vote_against"] <= 1, name
+
+
+# --- Task 4: narrow `policy`, widen the taxonomy -----------------------------
+
+def test_reaction_function_is_guidance_not_a_second_policy_paragraph():
+    """2016-03-16 has both 'the Committee decided to maintain the target
+    range...' and 'In determining the timing and size of future adjustments to
+    the target range...'. Both match the bare anchor phrase."""
+    paras = parse_statement(_html("statement_20160316.html"))
+    assert len([p for p in paras if p.role == "policy"]) == 1
+    assert any(p.role == "guidance" for p in paras)
+
+
+def test_decided_today_still_counts_as_a_decision():
+    """2020-03-03 reads 'decided TODAY to lower'. A literal 'Committee decided
+    to' substring misses the emergency 50bp cut entirely."""
+    paras = parse_statement(_html("statement_20200303.html"))
+    policy = [p for p in paras if p.role == "policy"]
+    assert len(policy) == 1
+    assert "1/2 percentage point" in policy[0].text
+
+
+def test_desk_directives_are_not_policy_decisions():
+    """2019-10-11 (reserve management) and 2020-03-23 (unlimited purchases) are
+    operational directives with no rate decision. Tagging them policy would
+    file them as rate decisions in the spine."""
+    for name in ("statement_20191011.html", "statement_20200323.html"):
+        roles = [p.role for p in parse_statement(_html(name))]
+        assert "directive" in roles, name
+
+
+def test_no_duplicate_unique_roles_in_any_fixture():
+    """Anchor collisions are the defect class this task exists to remove."""
+    for f in sorted(FIX.glob("statement_*.html")):
+        counts = collections.Counter(
+            p.role for p in parse_statement(f.read_text(encoding="utf-8")))
+        dupes = {r: counts[r] for r in UNIQUE_ROLES if counts[r] > 1}
+        assert not dupes, f"{f.name}: {dupes}"
+
+
+def test_recurring_paragraphs_are_all_classified():
+    """Replaces the original spec's 'zero unclassified' test, which can never
+    pass -- COVID, Ukraine and the 2023 banking-stress paragraphs are genuine
+    one-offs. What must never be unclassified is a paragraph the Fed prints
+    over and over, because that means an anchor has rotted."""
+    openings = collections.Counter()
+    for f in sorted(FIX.glob("statement_*.html")):
+        for p in parse_statement(f.read_text(encoding="utf-8")):
+            if p.role == "unclassified":
+                openings[p.text[:55]] += 1
+    recurring = {t: n for t, n in openings.items() if n >= 5}
+    assert not recurring, f"recurring unclassified paragraphs: {recurring}"
