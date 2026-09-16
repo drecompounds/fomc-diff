@@ -6,17 +6,20 @@ FIX = Path(__file__).parent / "fixtures"
 
 def _html(name): return (FIX / name).read_text(encoding="utf-8")
 
-def test_july_has_four_body_paragraphs():
+def test_july_has_five_body_paragraphs():
+    """Five, not four: the vote-announcement line was being deleted by the
+    release-line boilerplate filter until that defect was fixed."""
     paras = parse_statement(_html("statement_20260729.html"))
-    assert len(paras) == 4
+    assert len(paras) == 5
 
-def test_june_has_three_body_paragraphs():
+def test_june_has_four_body_paragraphs():
     paras = parse_statement(_html("statement_20260617.html"))
-    assert len(paras) == 3
+    assert len(paras) == 4
 
 def test_roles_assigned_by_anchor_not_position():
     paras = parse_statement(_html("statement_20260729.html"))
-    assert [p.role for p in paras] == ["policy", "economy", "inflation", "dissent"]
+    assert [p.role for p in paras] == [
+        "vote", "policy", "economy", "inflation", "dissent"]
 
 def test_no_unclassified_paragraphs_in_either_fixture():
     for name in ("statement_20260729.html", "statement_20260617.html"):
@@ -74,3 +77,58 @@ def test_error_messages_are_different():
     assert missing_msg != unterminated_msg
     assert "not found" in missing_msg
     assert "unterminated" in unterminated_msg
+
+
+# --- Defect 1: the boilerplate filter deleted real content -------------------
+# The Fed glues the release line and the "Share" widget onto the first body
+# paragraph in 86 of the 89 statements from 2016-2026. Dropping a paragraph
+# whole because it STARTS with boilerplate therefore deleted the lead economic
+# paragraph corpus-wide -- and on 2020-03-03 it deleted the rate decision.
+
+def test_release_line_does_not_swallow_the_rate_decision():
+    """2020-03-03, the emergency 50bp cut, carried its decision in the same
+    <p> as 'For release at 10:00 a.m. EST Share'. The old filter matched the
+    prefix and discarded the paragraph, so the statement parsed to exactly one
+    paragraph -- the voting list -- with the decision silently gone."""
+    paras = parse_statement(_html("statement_20200303.html"))
+    joined = " ".join(p.text for p in paras)
+    assert "decided today to lower the target range" in joined
+    assert "1 to 1‑1/4 percent" in joined or "1 to 1-1/4 percent" in joined
+
+
+def test_release_line_itself_is_still_stripped():
+    """Fixing the swallow must not re-admit the boilerplate it was written to
+    remove. The prefix goes; the sentence after it stays."""
+    paras = parse_statement(_html("statement_20200303.html"))
+    joined = " ".join(p.text for p in paras)
+    assert "For release at" not in joined
+    assert "EST Share" not in joined
+
+
+def test_lead_economic_paragraph_survives_in_a_normal_statement():
+    """The same glue sits on every ordinary statement, where it was eating the
+    opening economic assessment rather than the decision."""
+    paras = parse_statement(_html("statement_20250917.html"))
+    joined = " ".join(p.text for p in paras)
+    assert "growth of economic activity moderated" in joined
+    assert "For release at" not in joined
+
+
+def test_a_statement_never_parses_to_fewer_than_two_paragraphs():
+    """Confidently-short output is the failure mode that hid this defect: the
+    parse did not raise and did not return empty, it returned one plausible
+    paragraph. Every real statement has at least a decision and a vote."""
+    for name in ("statement_20200303.html", "statement_20250917.html",
+                 "statement_20260916.html"):
+        assert len(parse_statement(_html(name))) >= 2, name
+
+
+def test_html_comments_do_not_leak_into_paragraph_text():
+    """The 2026-09-16 statement wraps its vote line in HTML comments. Tag
+    stripping alone cannot remove them -- <[^>]+> stops at the first '>' inside
+    '<!-- ... -->' -- so '-->' fragments survived into the text, and therefore
+    into its sha256, which is the provenance key."""
+    for name in ("statement_20260916.html", "statement_20260729.html"):
+        for p in parse_statement(_html(name)):
+            assert "-->" not in p.text, f"{name}: comment residue in {p.text[:60]!r}"
+            assert "<!--" not in p.text
