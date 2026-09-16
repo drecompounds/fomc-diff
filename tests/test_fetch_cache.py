@@ -127,3 +127,48 @@ def test_missing_content_type_raises_error(tmp_path: Path):
     with pytest.raises(NonTextContentError):
         fetch("https://example.gov/b.htm", tmp_path, session=s, sleep=lambda _: None)
     assert not (tmp_path / "b.htm").exists()
+
+
+# --- provenance regression found on the live 2026-09-16 fetch ---------------
+
+def test_sha_is_stable_across_fetch_and_cache_reread(tmp_path):
+    """A fresh fetch and a cache hit must report the SAME sha for one document.
+
+    write_text() on Windows translates LF to CRLF, so a body served with CRLF
+    came back as CR CR LF on disk and the decoded re-read hashed differently
+    from the fetch. The manifest then mismatches on every document forever,
+    which destroys its only job: detecting a silently edited Fed page.
+    """
+    crlf = "<html>\r\n<body>\r\n<p>hi</p>\r\n</body>\r\n</html>"
+
+    class R:
+        status_code = 200
+        headers = {"Content-Type": "text/html; charset=utf-8"}
+        text = crlf
+        content = crlf.encode("utf-8")
+        def raise_for_status(self): pass
+
+    class S:
+        def get(self, url, timeout=30, headers=None): return R()
+
+    first = fetch("https://example.gov/x.htm", tmp_path, session=S(), sleep=lambda _: None)
+    second = fetch("https://example.gov/x.htm", tmp_path, session=S(), sleep=lambda _: None)
+    assert second.from_cache is True
+    assert first.sha256 == second.sha256, "sha must not change between fetch and cache re-read"
+
+
+def test_cached_bytes_are_byte_identical_to_what_was_served(tmp_path):
+    crlf = "<html>\r\n<p>hi</p>\r\n</html>"
+
+    class R:
+        status_code = 200
+        headers = {"Content-Type": "text/html; charset=utf-8"}
+        text = crlf
+        content = crlf.encode("utf-8")
+        def raise_for_status(self): pass
+
+    class S:
+        def get(self, url, timeout=30, headers=None): return R()
+
+    r = fetch("https://example.gov/y.htm", tmp_path, session=S(), sleep=lambda _: None)
+    assert r.path.read_bytes() == crlf.encode("utf-8"), "cached file must be byte-faithful to the server body"

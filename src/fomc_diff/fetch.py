@@ -97,10 +97,13 @@ def fetch(url: str, cache_dir: Path, *, session=None, sleep=time.sleep) -> Fetch
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     if path.exists():
-        body = path.read_text(encoding="utf-8")
+        # Hash the BYTES on disk, never the decoded string: read_text applies
+        # universal-newline translation, so a CRLF document hashes differently
+        # every time and the manifest can never match. Confirmed 2026-09-16.
+        raw = path.read_bytes()
         fetched_at = _get_fetched_at_from_cache(path, url)
         return FetchResult(url, path,
-                           hashlib.sha256(body.encode("utf-8")).hexdigest(),
+                           hashlib.sha256(raw).hexdigest(),
                            fetched_at, True)
 
     if session is None:
@@ -123,8 +126,11 @@ def fetch(url: str, cache_dir: Path, *, session=None, sleep=time.sleep) -> Fetch
             f"Binary fetching not supported yet; URL: {url}, Content-Type: {content_type!r}"
         )
 
-    body = resp.text
-    path.write_text(body, encoding="utf-8")
+    raw = resp.content
+    # Write BYTES verbatim. write_text() translates LF to CRLF on Windows,
+    # which turned a CRLF body into CR CR LF and corrupted the cached copy
+    # relative to what the Fed actually served.
+    path.write_bytes(raw)
 
     # Write sidecar metadata with fetched_at timestamp
     meta_path = path.with_suffix(path.suffix + ".meta.json")
@@ -132,5 +138,5 @@ def fetch(url: str, cache_dir: Path, *, session=None, sleep=time.sleep) -> Fetch
     meta_path.write_text(json.dumps(meta), encoding="utf-8")
 
     return FetchResult(url, path,
-                       hashlib.sha256(body.encode("utf-8")).hexdigest(),
+                       hashlib.sha256(raw).hexdigest(),
                        now, False)

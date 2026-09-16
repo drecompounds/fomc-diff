@@ -1,6 +1,7 @@
 """Structured facts extracted from a statement: vote, target range, dissent."""
 from __future__ import annotations
 
+import html as _html
 import re
 
 from .errors import FomcParseError
@@ -23,8 +24,13 @@ _VOTE = re.compile(rf"by a (\d+)\s*{_DASH}\s*(\d+)\s*vote", re.I)
 # fraction ("1/4") — the last is required for ZIRP-era statements
 # (2008-2015), which read "...at 0 to 1/4 percent".
 _NUM = r"\d+-\d+/\d+|\d+/\d+|\d+"
+# A hold reads "...federal funds rate AT x to y percent"; a hike or cut reads
+# "...federal funds rate BY 1/4 percentage point TO x to y percent". Both must
+# parse, or every meeting that actually moved rates is unreadable.
 _RANGE = re.compile(
-    rf"target range for the federal funds rate at ({_NUM}) to ({_NUM}) percent",
+    rf"target range for the federal funds rate\s+"
+    rf"(?:by\s+[\d/\- ]+percentage\s+points?\s+)?"
+    rf"(?:at|to)\s+({_NUM})\s+to\s+({_NUM})\s+percent",
     re.I)
 _DISSENT = re.compile(r"were (.+?), who (.+)$", re.S)
 _DIRECTIONS = ("raise", "lower", "maintain")
@@ -45,7 +51,10 @@ def parse_fraction(s: str) -> float:
 
 
 def parse_vote(html: str) -> tuple[int, int]:
-    m = _VOTE.search(html)
+    # Raw Fed HTML encodes the vote dash as an entity (&#8211;), which no dash
+    # character class can match. Unescape first or every real document looks
+    # like it has no vote line. Confirmed live on the 2026-09-16 statement.
+    m = _VOTE.search(_html.unescape(html))
     if not m:
         raise MeetingParseError("no vote line found")
     return int(m.group(1)), int(m.group(2))
