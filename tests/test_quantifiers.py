@@ -1,3 +1,4 @@
+import re
 from fomc_diff.quantifiers import count_quantifiers, _build_pattern, QUANTIFIERS
 
 def test_almost_all_does_not_also_count_as_all():
@@ -13,7 +14,7 @@ def test_removing_almost_all_creates_spurious_match():
     text = "Almost all participants agreed."
     matches = []
     for m in pattern.finditer(text):
-        quant = m.group(1).lower().replace(" ", " ")
+        quant = re.sub(r"\s+", " ", m.group(1).lower())
         population = m.group(2).lower()
         matches.append((population, quant))
     # Without "almost all" in the tuple, the pattern matches bare "all" at offset 7

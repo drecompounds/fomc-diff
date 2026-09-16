@@ -71,7 +71,8 @@ def extract_paragraphs(html: str) -> list[str]:
     out: list[str] = []
     for raw in _P.findall(article_html):
         text = html_mod.unescape(_TAG.sub(" ", raw))
-        text = text.replace(" ", " ")
+        # _WS (regex \s+) already matches NBSP (Unicode \s includes NBSP),
+        # so a separate NBSP-to-space replace here would be dead code.
         text = _WS.sub(" ", text).strip()
         if text:
             out.append(text)
