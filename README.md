@@ -42,7 +42,7 @@ code reads better than a model does.
 Requires Python 3.11+.
 
 ```bash
-git clone https://github.com/<you>/fomc-diff
+git clone https://github.com/drecompounds/fomc-diff
 cd fomc-diff
 python -m venv .venv
 .venv/Scripts/pip install -e ".[dev]"   # Windows
