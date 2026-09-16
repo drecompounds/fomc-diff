@@ -933,11 +933,40 @@ Write `build_rows` to, for each date in sorted order: parse paragraphs; determin
 
 - [ ] **Step 4: Run the FULL suite** — expected: all pass.
 
-- [ ] **Step 5: Disable-proof**
+- [ ] **Step 5: Add the year-contiguity check to `run()`**
 
-Make `statement_type` always `"decision"`. Confirm `test_operational_statements_are_labelled_and_need_no_vote` fails. Restore.
+Pre-flight Finding 1: `build_corpus`'s per-year minimum counts only years that
+APPEAR. A year missing entirely — a listing page that failed to fetch, or whose
+layout changed so no anchor matched — produces no key, so the guard never
+inspects it. `run()` is the only caller that knows the full intended page set,
+so the check belongs here:
 
-- [ ] **Step 6: Run the real backfill and commit the data**
+```python
+years = {d.year for d in corpus}
+expected = set(range(discover.FIRST_YEAR, current_year + 1))
+missing = expected - years
+if missing:
+    raise DiscoveryError(
+        f"no statements discovered for {sorted(missing)}; a listing page "
+        "probably failed to parse. Refusing to write a corpus with a hole in it.")
+```
+
+```python
+def test_a_missing_year_is_refused_rather_than_written():
+    """A year absent entirely produces no per-year count, so build_corpus's
+    minimum cannot see it. Without this, a failed listing page ships a corpus
+    with a silent hole."""
+    import pytest
+    from fomc_diff.discover import DiscoveryError
+    with pytest.raises(DiscoveryError, match="2017"):
+        _run_with_corpus({date(2016, 3, 16): "...", date(2026, 9, 16): "..."})
+```
+
+- [ ] **Step 6: Disable-proof**
+
+Make `statement_type` always `"decision"`. Confirm `test_operational_statements_are_labelled_and_need_no_vote` fails. Restore. Then remove the contiguity check and confirm `test_a_missing_year_is_refused_rather_than_written` fails. Restore.
+
+- [ ] **Step 7: Run the real backfill and commit the data**
 
 ```bash
 PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe -m fomc_diff.backfill --out data/
