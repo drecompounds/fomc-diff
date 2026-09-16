@@ -34,9 +34,15 @@ _ECONOMY_OPENINGS = (
     "Although overall economic activity",
     "Overall economic activity",
     "The fundamentals of the U.S. economy",
-    "The coronavirus outbreak is causing",
-    "The COVID-19 pandemic is causing",
+    # Stems, deliberately short. Each time these were written as longer
+    # phrases the Fed's next rewording defeated them: "is causing" missed
+    # "has harmed", and "With progress on vaccinations" missed a bare
+    # "Progress on vaccinations". Match the shortest prefix that is still
+    # unambiguous.
+    "The coronavirus outbreak",
+    "The COVID-19 pandemic",
     "With progress on vaccinations",
+    "Progress on vaccinations",
 )
 
 
