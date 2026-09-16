@@ -94,7 +94,7 @@ def test_september_2026_fixture_end_to_end():
     from fomc_diff.parse import parse_statement
     raw = (Path(__file__).parent / "fixtures" / "statement_20260916.html").read_text(encoding="utf-8")
     paras = parse_statement(raw)
-    assert [p.role for p in paras] == ["policy", "economy", "inflation"]
+    assert [p.role for p in paras] == ["vote", "policy", "economy", "inflation"]
     assert parse_vote(raw) == (12, 0)
     policy = [p.text for p in paras if p.role == "policy"][0]
     assert parse_target_range(policy) == (3.75, 4.0)
