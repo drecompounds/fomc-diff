@@ -45,7 +45,8 @@ paragraph — **structural facts, not tone**. The deterministic pass caught what
 model pass would most likely have smoothed away.
 
 Therefore: every number in this repo is computed in plain Python. A model writes
-captions only, in a separate labeled column, and never sees source text.
+captions only, in a separate labeled column, and every figure a caption cites is
+checked against the computed row it came from.
 
 ## Architecture
 
@@ -202,14 +203,38 @@ press conference and by unrelated same-day tape. They are color, not evidence.
 
 ## Annotation layer
 
-`annotate.py` is opt-in via `--annotate`, never runs in CI, and writes only to
-`annotations.csv` (`meeting_date, caption, model, generated_at, prompt_sha`).
+Captions are written by a Claude Code session, not by an API call. This removes
+any API-credit dependency and any key from the project entirely.
 
-**Structural guarantee:** annotate.py is handed only the computed row, never the
-source text. It cannot invent a figure because it never sees one that is not
-already in a deterministic table. Captions are labeled commentary in the README
-and appear on no chart axis.
+The flow is export / write / verify:
 
+1. `annotate.py export` writes `data/annotations_todo.csv` — one row per meeting,
+   containing **only** the computed fields a caption may reference.
+2. A Claude Code session reads that file and writes captions into
+   `annotations.csv` (`meeting_date, caption, author, generated_at, source_sha`),
+   where `source_sha` is the SHA-256 of the todo row the caption was written
+   from.
+3. `annotate.py verify` enforces the guarantee below and is wired into the test
+   suite.
+
+**Why the guarantee changed.** With an API call, "the model never sees source
+text" was structural: the script controlled the payload. A Claude Code session
+can read `data/text/` regardless of instructions, so that framing would be a
+convention dressed up as a guarantee. It is replaced with one that does not
+depend on what the model saw:
+
+> **Numeric containment.** Every number appearing in a caption must also appear
+> in that meeting's todo row. A caption citing any figure not in its row fails
+> `verify`, and the suite goes red.
+
+This is strictly stronger than the original: the old rule made fabrication
+unlikely by withholding input; this one makes fabrication *detectable* no matter
+what the input was.
+
+`source_sha` additionally catches a caption left stale after its underlying row
+was recomputed — the caption still claims a number the row no longer holds.
+
+Captions are labeled commentary in the README and appear on no chart axis.
 This is the last milestone and blocks nothing; the dataset ships complete
 without it.
 
@@ -223,6 +248,7 @@ without it.
 | 4 | `"almost all participants"` fixture yields `almost_all=1, all=0` | the substring trap |
 | 5 | Mutating `turn_rules.yaml` must change the output | proves the config has a real reader; a config check that passes without one is vacuous |
 | 6 | `--annotate` off leaves all other tables byte-identical | annotation cannot contaminate the deterministic spine |
+| 7 | A caption citing a number absent from its todo row fails `verify` | fabricated or stale figures, regardless of what the author read |
 
 ## Failure modes
 
@@ -237,8 +263,8 @@ without it.
 
 ## Security
 
-- No secrets belong in this repo. FRED is keyless; `annotate.py` reads any key
-  from env only.
+- No secrets belong in this repo. FRED is keyless and captions are written by a
+  Claude Code session, so the project requires no API key at all.
 - `.gitignore` was committed before any other file.
 - A leaked key is a rotation, never a history rewrite: force-pushing does not
   remove data from GitHub.
@@ -250,7 +276,8 @@ without it.
 3. `quantifiers.py` + `quantifiers.csv`
 4. `macro.py` + `reaction.py`, `config/turn_rules.yaml` — Claim A computable
 5. notebooks + charts + README
-6. `annotate.py` (blocked on Anthropic API credits; optional)
+6. `annotate.py` export/verify + Claude Code caption pass (optional; no API
+   dependency)
 
 ## Open questions
 
