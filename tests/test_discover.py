@@ -91,3 +91,17 @@ def test_listing_urls_covers_the_whole_span():
     assert any("fomchistorical2020.htm" in u for u in urls)
     assert any("fomccalendars.htm" in u for u in urls)
     assert not any("fomchistorical2021.htm" in u for u in urls)
+
+
+def test_a_date_listed_twice_resolves_to_the_first_link():
+    """The spec requires a reissued or corrected statement to resolve to its
+    first occurrence, never by dict-overwrite. Both fixtures' duplicate-date
+    pairs are filtered by label before the dict write, so nothing else in the
+    suite can tell setdefault from plain assignment -- this is the only test
+    that holds that guarantee down."""
+    html = (
+        '<a href="/newsevents/pressreleases/monetary20260916a.htm">Statement</a>'
+        '<a href="/newsevents/pressreleases/monetary20260916z.htm">Statement</a>'
+    )
+    links = statement_links(html)
+    assert links[date(2026, 9, 16)].endswith("monetary20260916a.htm")
