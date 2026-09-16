@@ -203,6 +203,29 @@ Because `policy` becomes strictly narrower, an era phrasing the decision
 differently produces zero `policy` paragraphs rather than a wrong one, and that
 raises.
 
+## Defect 6 - the target range parser reads raw HTML
+
+`parse_target_range` fails on 15 of 89, for two measured causes.
+
+1. **U+2011 NON-BREAKING HYPHEN** in fractions. The Fed writes "4‑1/4" with
+   U+2011, not ASCII hyphen, and mixes the two inside a single sentence
+   ("at 1‑1/2 to 1-3/4 percent"). The number pattern and `parse_fraction`
+   both accept only ASCII `-`.
+2. **Inline markup inside the phrase.** The function runs against raw HTML, and
+   the 2026-09-16 statement reads `rate by 1/4 percentage point<strong>
+   </strong>to 3-3/4<strong> </strong>to 4 percent`. The text is pure ASCII; the
+   tags alone defeat the match.
+
+Cause 2 is the **third instance of one defect class**: structured extraction run
+against raw HTML instead of cleaned paragraph text. `parse_vote` needed
+`_html.unescape` for `&#8211;`; `sep.py` needed an en-dash character class for
+table cells; now this. The fix is structural - route extraction through
+`parse_statement` - rather than widening another pattern and waiting for the
+fourth instance.
+
+Note the ZIRP range ("0 to 1/4 percent") is **not** a cause. It parses correctly
+today. It stays in the fixture set as a regression guard.
+
 ## Role taxonomy
 
 Ordered; first match wins.
