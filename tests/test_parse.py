@@ -228,13 +228,20 @@ def test_recurring_paragraphs_are_all_classified():
     """Replaces the original spec's 'zero unclassified' test, which can never
     pass -- COVID, Ukraine and the 2023 banking-stress paragraphs are genuine
     one-offs. What must never be unclassified is a paragraph the Fed prints
-    over and over, because that means an anchor has rotted."""
+    over and over, because that means an anchor has rotted.
+
+    Threshold is 8, matching the spec (docs/superpowers/specs/2026-09-16-
+    corpus-backfill-2016-2026-design.md:299), not 5: on the real 89-document
+    corpus "The U.S. banking system is sound and resilient..." recurs 6 times
+    and "Russia's war against Ukraine..." 5 times, and both are genuine
+    episodic content, not a rotted anchor. tests/test_corpus.py runs this
+    same check over the shipped dataset with the same threshold."""
     openings = collections.Counter()
     for f in sorted(FIX.glob("statement_*.html")):
         for p in parse_statement(f.read_text(encoding="utf-8")):
             if p.role == "unclassified":
                 openings[p.text[:55]] += 1
-    recurring = {t: n for t, n in openings.items() if n >= 5}
+    recurring = {t: n for t, n in openings.items() if n >= 8}
     assert not recurring, f"recurring unclassified paragraphs: {recurring}"
 
 
