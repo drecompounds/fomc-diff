@@ -98,3 +98,36 @@ def test_september_2026_fixture_end_to_end():
     assert parse_vote(raw) == (12, 0)
     policy = [p.text for p in paras if p.role == "policy"][0]
     assert parse_target_range(policy) == (3.75, 4.0)
+
+
+# --- Task 5: vote counts from a named roll when no line is printed --------
+
+@pytest.mark.parametrize("name,expected", [
+    ("statement_20190918.html", (7, 3)),
+    ("statement_20211215.html", (11, 0)),
+    ("statement_20250917.html", (11, 1)),
+    ("statement_20200916.html", (8, 2)),
+    ("statement_20160316.html", (9, 1)),
+])
+def test_named_list_vote_counts(name, expected):
+    """Counts verified by hand from the fixture text. No statement carries both
+    a printed count and a named list, so there is nothing to cross-check
+    against -- these numbers are the ground truth."""
+    assert parse_vote(_html(name)) == expected
+
+
+def test_unanimous_vote_is_a_fact_not_a_parse_failure():
+    """2021-12-15 has no against-clause. Zero dissents must come back as 0, not
+    raise, and not be confused with 'could not find the vote'."""
+    assert parse_vote(_html("statement_20211215.html")) == (11, 0)
+
+
+def test_titles_are_not_counted_as_voters():
+    """'Jerome H. Powell, Chair, John C. Williams, Vice Chair' is two people.
+    Counting comma-separated segments naively makes it four."""
+    assert parse_vote(_html("statement_20190918.html"))[0] == 7
+
+
+def test_counted_era_still_uses_the_printed_line():
+    """2026 prints 'by a 9-3 vote'. That branch must not regress."""
+    assert parse_vote(_html("statement_20260729.html")) == (9, 3)

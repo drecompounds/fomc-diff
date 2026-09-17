@@ -5,6 +5,7 @@ import html as _html
 import re
 
 from .errors import FomcParseError
+from .parse import parse_statement
 
 
 class MeetingParseError(FomcParseError):
@@ -35,6 +36,39 @@ _RANGE = re.compile(
 _DISSENT = re.compile(r"were (.+?), who (.+)$", re.S)
 _DIRECTIONS = ("raise", "lower", "maintain")
 
+_TITLES = re.compile(
+    r",\s*(?:Vice\s+Chairman|Vice\s+Chair|Chairman|Chair)\b", re.I)
+_VOTE_FOR_OPEN = re.compile(
+    r"Voting for the (?:FOMC )?monetary policy action (?:were|was):?\s*", re.I)
+_VOTE_AGAINST_OPEN = re.compile(
+    r"Voting against (?:the|this) action (?:were|was)\s*", re.I)
+
+
+def _count_names(segment: str) -> int:
+    """Count people in a 'for' list. Titles are appositives, not voters."""
+    seg = _TITLES.sub("", segment)
+    seg = seg.rstrip(". ")
+    parts = re.split(r";|,| and ", seg)
+    return len([p for p in parts if p.strip()])
+
+
+def _count_dissenters(segment: str) -> int:
+    """Count people in an 'against' clause.
+
+    Each dissent group is 'Name[ and Name], who <prose>'. The prose is full of
+    capitalised words ('Committee'), so names must be taken from BEFORE the
+    ', who' rather than matched across the whole clause.
+    """
+    total = 0
+    for group in segment.split(";"):
+        group = re.sub(r"^\s*and\s+", "", group.strip())
+        head = re.split(r",\s*who\b", group)[0]
+        head = _TITLES.sub("", head).rstrip(". ")
+        if not head:
+            continue
+        total += len([p for p in re.split(r"\s+and\s+|,", head) if p.strip()])
+    return total
+
 
 def parse_fraction(s: str) -> float:
     """'3-1/2' -> 3.5. '1/4' -> 0.25 (bare fraction). Plain integers pass
@@ -51,13 +85,42 @@ def parse_fraction(s: str) -> float:
 
 
 def parse_vote(html: str) -> tuple[int, int]:
+    """Vote counts, from the printed line when the Fed prints one, else by
+    counting the names it lists.
+
+    'by a N-M vote' appears only from 2026. For 2016-2025 the Committee prints
+    a named roll instead, so the count must be derived.
+    """
     # Raw Fed HTML encodes the vote dash as an entity (&#8211;), which no dash
     # character class can match. Unescape first or every real document looks
     # like it has no vote line. Confirmed live on the 2026-09-16 statement.
-    m = _VOTE.search(_html.unescape(html))
-    if not m:
-        raise MeetingParseError("no vote line found")
-    return int(m.group(1)), int(m.group(2))
+    text = _html.unescape(html)
+    m = _VOTE.search(text)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+
+    paras = parse_statement(html)
+    for_text = next((p.text for p in paras if p.role == "vote_for"), None)
+    against_text = next((p.text for p in paras if p.role == "vote_against"), None)
+    if for_text is None and against_text is None:
+        raise MeetingParseError(
+            "no vote found: neither a printed 'by a N-M vote' line nor a "
+            "'Voting for' roll is present")
+
+    n_for = 0
+    if for_text is not None:
+        body = _VOTE_FOR_OPEN.split(for_text, maxsplit=1)[-1]
+        # A combined paragraph carries the against-clause too; split it off.
+        halves = re.split(r"Voting against", body, maxsplit=1, flags=re.I)
+        n_for = _count_names(halves[0])
+        if len(halves) > 1 and against_text is None:
+            against_text = "Voting against" + halves[1]
+
+    n_against = 0
+    if against_text is not None:
+        clause = _VOTE_AGAINST_OPEN.split(against_text, maxsplit=1)[-1]
+        n_against = _count_dissenters(clause)
+    return n_for, n_against
 
 
 def parse_target_range(text: str) -> tuple[float, float]:
