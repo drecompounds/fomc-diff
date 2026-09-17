@@ -79,10 +79,23 @@ def test_a_complete_year_short_of_eight_statements_raises():
         build_corpus(pages, current_year=2026)
 
 
-def test_the_in_progress_year_is_exempt_from_the_count_guard():
-    """2026 has six statements so far and must not raise for it."""
+def test_the_in_progress_year_is_exempt_from_the_full_year_minimum():
+    """Early in the year, one statement satisfies the partial floor -- the
+    current year is exempt from the FULL 8-per-year minimum, not from any
+    floor at all (see the truncation test below)."""
     pages = {"only_one": '<a href="/newsevents/pressreleases/monetary20260101a.htm">Statement</a>'}
-    assert len(build_corpus(pages, current_year=2026)) == 1
+    corpus = build_corpus(pages, current_year=2026, today=date(2026, 2, 1))
+    assert len(corpus) == 1
+
+
+def test_a_truncated_current_year_page_is_not_silently_accepted():
+    """The old guard exempted the current year from ANY floor, so a
+    truncated calendar page losing all but one 2026 entry passed silently.
+    By September (Q3 elapsed, 3 quarters), one statement is far short of
+    what roughly one meeting per quarter warrants."""
+    pages = {"only_one": '<a href="/newsevents/pressreleases/monetary20260101a.htm">Statement</a>'}
+    with pytest.raises(DiscoveryError, match="2026"):
+        build_corpus(pages, current_year=2026, today=date(2026, 9, 16))
 
 
 def test_listing_urls_covers_the_whole_span():

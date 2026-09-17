@@ -87,11 +87,30 @@ def listing_urls(through_year: int) -> list[str]:
     return urls
 
 
-def build_corpus(pages: dict[str, str], current_year: int) -> dict[date, str]:
+def _elapsed_quarters(year: int, today: date) -> int:
+    """How many quarters of `year` have started, as of `today`.
+
+    A year strictly before `today.year` is fully elapsed (4). A year in
+    progress counts the quarter `today` currently sits in as started. Used
+    as a partial floor for the current year, which cannot be held to the
+    full-year MIN_MEETINGS_PER_YEAR minimum -- it isn't over yet -- but must
+    not be exempt from any floor at all.
+    """
+    if today.year > year:
+        return 4
+    return (today.month - 1) // 3 + 1
+
+
+def build_corpus(
+    pages: dict[str, str], current_year: int, today: date | None = None,
+) -> dict[date, str]:
     """Merge every listing page into one date-to-URL map, and sanity-check it.
 
     `pages` maps an identifier to already-fetched HTML, so this stays offline.
+    `today` defaults to the real date; tests pass it explicitly to keep the
+    in-progress-year floor deterministic.
     """
+    today = today or date.today()
     corpus: dict[date, str] = {}
     for html in pages.values():
         for d, url in statement_links(html).items():
@@ -103,8 +122,21 @@ def build_corpus(pages: dict[str, str], current_year: int) -> dict[date, str]:
 
     per_year = collections.Counter(d.year for d in corpus)
     for year, n in sorted(per_year.items()):
-        if year >= current_year:
-            continue          # in progress, incomplete by definition
+        if year > current_year:
+            continue          # future year; should not happen, harmless
+        if year == current_year:
+            # In progress, so the full-year minimum does not apply -- but the
+            # FOMC meets roughly twice a quarter, so a completely truncated
+            # listing page (all but one entry lost) must still be caught
+            # rather than passing silently just because the year isn't over.
+            floor = _elapsed_quarters(year, today)
+            if n < floor:
+                raise DiscoveryError(
+                    f"{year} (in progress) yielded only {n} statement(s) "
+                    f"through {today.isoformat()}, fewer than the {floor} "
+                    "elapsed quarter(s) warrant at roughly one meeting per "
+                    "quarter; the listing page may have been truncated")
+            continue
         if n < MIN_MEETINGS_PER_YEAR:
             raise DiscoveryError(
                 f"{year} yielded only {n} statements; the FOMC holds at least "
