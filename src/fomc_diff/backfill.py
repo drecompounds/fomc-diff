@@ -8,13 +8,26 @@ the test suite exercises.
 `run()` is the only network- and filesystem-touching entry point. It resolves
 the listing pages, fetches every statement (rate-limited, cached), builds the
 three tables via `build_rows`, and additionally writes a manifest table
-recording the sha256/fetched_at provenance of every fetched document --
-that is why `data/raw/` itself is gitignored (see the repo's .gitignore):
+recording the provenance of every fetched document -- that is why
+`data/raw/` itself is gitignored (see the repo's .gitignore):
 reproducibility comes from the manifest, not from the cache.
+
+The manifest records a hash of the EXTRACTED TEXT, not of the raw bytes.
+The Fed's pages are not byte-stable: Cloudflare injects a randomised
+email-protection token and a per-response script, so two fetches a second
+apart produce different bytes and a different raw sha256. A raw hash
+therefore mismatches on every refetch and can never distinguish a real
+edit from that noise -- which is the manifest's only job. The extracted
+text was verified stable across repeated fetches of both a 2016 and a
+2026 statement.
+
+The raw-bytes hash still lives in each cache entry's sidecar, where it is
+the right check: it detects local corruption of a file at rest.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 from datetime import date
 from pathlib import Path
 
@@ -36,7 +49,7 @@ DIFFS_FIELDS = [
     "from_date", "to_date", "role", "change_type",
     "words_added", "words_removed", "word_diff",
 ]
-MANIFEST_FIELDS = ["meeting_date", "url", "sha256", "fetched_at", "from_cache"]
+MANIFEST_FIELDS = ["meeting_date", "url", "content_sha256", "fetched_at", "from_cache"]
 
 # The FOMC raised to 0.25-0.50 percent on 2015-12-16, the meeting before this
 # corpus begins. Seeding it makes the first row's decision a measurement
@@ -134,6 +147,18 @@ def build_rows(
     return meetings, statements, diffs
 
 
+def _content_hash(html: str) -> str:
+    """Hash the extracted, role-tagged text of a statement.
+
+    Stable across refetches, unlike a hash of the raw bytes, and therefore
+    the only hash that can detect the Fed silently editing a published
+    document. Includes the role so a paragraph changing role is a change.
+    """
+    paras = parse_statement(html)
+    joined = "\n".join(f"{p.role}\t{p.text}" for p in paras)
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+
 def run(cache_dir: Path, out_dir: Path, *, current_year: int) -> None:
     """Discover, fetch, and write the four corpus CSVs.
 
@@ -172,7 +197,7 @@ def run(cache_dir: Path, out_dir: Path, *, current_year: int) -> None:
         manifest.append({
             "meeting_date": d,
             "url": res.url,
-            "sha256": res.sha256,
+            "content_sha256": _content_hash(documents[d]),
             "fetched_at": res.fetched_at,
             "from_cache": res.from_cache,
         })

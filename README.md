@@ -105,10 +105,24 @@ The rule now has a guard behind it. A statement parsing to fewer than two
 paragraphs raises, every recurring paragraph must carry a role, and both are
 checked against the whole corpus rather than a handful of fixtures.
 
-**Byte-faithful provenance.** Cached documents are stored and hashed as bytes.
-An earlier version wrote them as text, which on Windows translated line endings
-and produced three different SHAs for one document — making the manifest
-useless for its only job, detecting a silently edited page.
+**Provenance hashes what is stable.** `manifest.csv` records a hash of each
+statement's *extracted text*, not of its raw bytes.
+
+federalreserve.gov is not byte-stable. Cloudflare injects a randomised
+email-protection token and a per-response script, so two fetches a second apart
+return different bytes and a different raw SHA — verified live against both a
+2016 and a 2026 statement. A manifest keyed on raw bytes mismatches on every
+refetch and so can never distinguish a real edit from that noise, which is the
+only thing it exists to detect. The extracted text is stable across refetches,
+and the manifest is byte-identical run to run.
+
+Raw bytes are still hashed where that is the right check: each cached file's
+sidecar records the SHA of the bytes on disk, and a cache hit re-verifies it.
+A torn write once corrupted a cached document, the next run served it and
+recorded the damaged hash as ground truth, and a corrupted row reached this
+dataset. Cached bodies are written to a temporary file and moved into place
+atomically, and an entry whose hash cannot be verified is refetched rather
+than trusted.
 
 **Structure over tone.** Vote counts, dissent names and directions, and added
 or removed paragraphs are facts the Fed prints. They are read directly.
@@ -141,7 +155,7 @@ byte-identical files.
 | `meetings.csv` | 89 | The spine: `meeting_date, statement_type, vote_for, vote_against, target_lower, target_upper, decision` |
 | `statements.csv` | 479 | One row per role-tagged paragraph |
 | `diffs.csv` | 520 | Role-aligned paragraph and word diffs between consecutive meetings |
-| `manifest.csv` | 89 | `url, fetched_at, sha256` of each raw page |
+| `manifest.csv` | 89 | `url, fetched_at, content_sha256` — a hash of each statement's extracted text, stable across refetches |
 
 89 statements, 2016-01-27 to 2026-09-16: 87 rate decisions (56 holds, 20 hikes,
 11 cuts) and 2 operational Desk directives that carry no rate decision and no
