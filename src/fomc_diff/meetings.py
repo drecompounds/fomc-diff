@@ -103,16 +103,33 @@ def parse_vote(html: str) -> tuple[int, int]:
 
     'by a N-M vote' appears only from 2026. For 2016-2025 the Committee prints
     a named roll instead, so the count must be derived.
+
+    `_VOTE` is searched over the article's own cleaned paragraph text, not
+    the raw page: a `<div id="nav">` or similar boilerplate block elsewhere
+    on the page can carry an unrelated "approved by a N-M vote" phrase (e.g.
+    a link's surrounding text) that would otherwise short-circuit past this
+    statement's actual, named roll. The raw page is used only as a fallback
+    when the page has no recognisable article container at all, so a bare
+    string like "<p>by a 9 - 3 vote</p>" (no <div id="article">) still works.
     """
     # Raw Fed HTML encodes the vote dash as an entity (&#8211;), which no dash
     # character class can match. Unescape first or every real document looks
     # like it has no vote line. Confirmed live on the 2026-09-16 statement.
     text = _html.unescape(html)
-    m = _VOTE.search(text)
+    try:
+        paras = parse_statement(html)
+    except ArticleContainerError:
+        m = _VOTE.search(text)
+        if m:
+            return int(m.group(1)), int(m.group(2))
+        raise MeetingParseError(
+            "no vote found: neither a printed 'by a N-M vote' line nor a "
+            "'Voting for' roll is present")
+
+    m = _VOTE.search(" ".join(p.text for p in paras))
     if m:
         return int(m.group(1)), int(m.group(2))
 
-    paras = parse_statement(html)
     for_text = next((p.text for p in paras if p.role == "vote_for"), None)
     against_text = next((p.text for p in paras if p.role == "vote_against"), None)
     if for_text is None and against_text is None:
@@ -142,15 +159,21 @@ def parse_target_range(text: str) -> tuple[float, float]:
     Raw HTML is routed through parse_statement first: the Fed puts
     "<strong> </strong>" INSIDE the phrase (live in the 2026-09-16 statement),
     and a regex run against raw markup cannot match across it.
+
+    Only the cleaned `policy`/`directive` paragraph text is ever searched --
+    never the raw page. A page whose article has no policy/directive
+    paragraph must raise, not fall back to searching a footer or nav block
+    that happens to carry plausible-looking target-range text unrelated to
+    this statement's actual decision. `ArticleContainerError` (no
+    recognisable article container at all) is likewise never swallowed: a
+    structurally broken page is a different failure than a well-formed one
+    that simply lacks the paragraph, and both must be loud.
     """
     haystack = text
     if "<" in text:
-        try:
-            paras = parse_statement(text)
-        except ArticleContainerError:
-            paras = []
+        paras = parse_statement(text)
         haystack = " ".join(
-            p.text for p in paras if p.role in ("policy", "directive")) or text
+            p.text for p in paras if p.role in ("policy", "directive"))
     m = _RANGE.search(haystack)
     if not m:
         raise MeetingParseError("no target range found")

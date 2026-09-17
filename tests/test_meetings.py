@@ -4,6 +4,7 @@ from fomc_diff.meetings import (
     parse_fraction, parse_vote, parse_target_range, parse_dissent,
     derive_decision, MeetingParseError,
 )
+from fomc_diff.parse import ArticleContainerError
 
 FIX = Path(__file__).parent / "fixtures"
 def _html(name): return (FIX / name).read_text(encoding="utf-8")
@@ -184,6 +185,46 @@ def test_inline_markup_inside_the_phrase_does_not_defeat_the_match():
 
 def test_unparseable_range_raises_rather_than_returning_zero():
     """A range of 0 to 0 is a plausible-looking wrong answer, and ZIRP makes it
-    look legitimate. Absence must raise."""
-    with pytest.raises(MeetingParseError):
+    look legitimate. Absence must raise.
+
+    A page with no recognisable <div id="article"> at all is a structural
+    failure, not merely a page that lacks a target-range line -- it now
+    surfaces as ArticleContainerError (propagated, not swallowed into an
+    empty-string fallback that would let a regex loose on the raw page; see
+    test_target_range_never_falls_back_to_the_raw_page below for that case)."""
+    with pytest.raises(ArticleContainerError):
         parse_target_range("<html><body><p>No range here.</p></body></html>")
+
+
+def test_target_range_never_falls_back_to_the_raw_page():
+    """A well-formed article that simply has no policy/directive paragraph
+    must raise MeetingParseError, never fall back to searching the raw page.
+    Confirmed defect: a footer outside the article containing 'target range
+    for the federal funds rate at 9 to 9-1/4 percent' used to be returned as
+    (9.0, 9.25) via the old `haystack = ... or text` fallback, even though
+    the article itself never mentions a target range at all."""
+    html = (
+        '<div id="article">'
+        "<p>Economic activity is expanding at a solid pace.</p>"
+        "<p>Inflation remains elevated relative to the Committee's 2 percent "
+        "goal.</p>"
+        "</div>"
+        '<div id="footer">target range for the federal funds rate at 9 to '
+        "9-1/4 percent</div>"
+    )
+    with pytest.raises(MeetingParseError):
+        parse_target_range(html)
+
+
+def test_parse_vote_ignores_a_vote_line_outside_the_article():
+    """A <div id="nav"> (or any boilerplate outside the article) can carry an
+    unrelated 'approved by a N-M vote' phrase. It must never short-circuit
+    past this statement's own, named roll inside the article."""
+    html = (
+        '<div id="nav">approved by a 7-2 vote</div>'
+        '<div id="article">'
+        "<p>Voting for the monetary policy action were Jerome H. Powell, "
+        "Chair; John C. Williams, Vice Chair; and Jane Doe.</p>"
+        "</div>"
+    )
+    assert parse_vote(html) == (3, 0)
