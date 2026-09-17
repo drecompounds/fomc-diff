@@ -1,6 +1,7 @@
 # fomc-diff
 
-A deterministic diff engine for Federal Reserve FOMC statements.
+A deterministic diff engine and open dataset for Federal Reserve FOMC
+statements, covering every meeting from January 2016 to September 2026.
 
 It reads the Fed's published statements, diffs each one against the previous
 meeting, and reports what actually changed: the vote, the target range, the
@@ -90,8 +91,19 @@ is not in the data fails the test suite.
 
 **Empty is never quiet.** A parse that cannot find what it is looking for
 raises. It never returns a plausible-looking wrong value, and it never writes
-an empty table. On its first live document — the September 16, 2026 statement —
-this engine failed in three places and not one of them returned a wrong number.
+an empty table.
+
+That claim was overstated, and the corpus proved it. The boilerplate filter
+dropped any paragraph beginning with a known prefix — and the Fed glues its
+release line onto the front of the first body paragraph, so the opening
+economic assessment was deleted in 86 of 89 statements. On March 3, 2020 the
+emergency 50 basis point cut was inside that paragraph, so the rate decision
+itself was discarded. Nothing raised. The output was not empty and not loud:
+it was *confidently short*.
+
+The rule now has a guard behind it. A statement parsing to fewer than two
+paragraphs raises, every recurring paragraph must carry a role, and both are
+checked against the whole corpus rather than a handful of fixtures.
 
 **Byte-faithful provenance.** Cached documents are stored and hashed as bytes.
 An earlier version wrote them as text, which on Windows translated line endings
@@ -105,37 +117,82 @@ or removed paragraphs are facts the Fed prints. They are read directly.
 
 | Module | Responsibility |
 |---|---|
+| `discover.py` | Resolves statement URLs from the Fed's own listing pages, by label. The only module that decides what counts as a statement. |
 | `fetch.py` | Cached, rate-limited fetching with SHA provenance. The only module that touches the network. |
-| `parse.py` | HTML to role-tagged paragraphs (`policy`, `economy`, `inflation`, `dissent`). |
+| `parse.py` | HTML to role-tagged paragraphs (`policy`, `economy`, `inflation`, `vote_for`, `vote_against`, `guidance`, `directive` and others). |
 | `meetings.py` | Vote, target range, dissent names and direction, derived decision. |
 | `diffing.py` | Role-aligned paragraph and word diffs. |
 | `quantifiers.py` | Graded hedge counts from minutes ("a few" / "several" / "most" participants). |
 | `phrases.py` | First and last appearance of tracked phrases across the corpus. |
 | `sep.py` | Summary of Economic Projections (the dot-plot tables): medians, central tendency and range per variable per horizon, plus release-to-release deltas. |
+| `backfill.py` | Drives the whole corpus into the four committed CSVs. |
 | `tables.py` | CSV writers that refuse to write an empty table. |
 
 Design and implementation notes live in `docs/superpowers/`.
 
+## The dataset
+
+`data/` holds the corpus, regenerable from scratch with
+`python -m fomc_diff.backfill`. Re-running against a warm cache produces
+byte-identical files.
+
+| File | Rows | What it is |
+|---|---|---|
+| `meetings.csv` | 89 | The spine: `meeting_date, statement_type, vote_for, vote_against, target_lower, target_upper, decision` |
+| `statements.csv` | 479 | One row per role-tagged paragraph |
+| `diffs.csv` | 520 | Role-aligned paragraph and word diffs between consecutive meetings |
+| `manifest.csv` | 89 | `url, fetched_at, sha256` of each raw page |
+
+89 statements, 2016-01-27 to 2026-09-16: 87 rate decisions (56 holds, 20 hikes,
+11 cuts) and 2 operational Desk directives that carry no rate decision and no
+vote. 45 dissenting votes across 27 meetings.
+
+`decision` is never read from prose. It is computed by comparing each meeting's
+target range against the previous one, which keeps the most important
+categorical column out of reach of wording changes.
+
+Statement URLs are resolved from the Fed's own listing pages by anchor label,
+never built from a date. The suffix is not an identity: `monetary20160127b.htm`
+is the Statement on Longer-Run Goals, published the same day as the January
+policy statement, and December 2008's statement is at `b.htm` while `a.htm` is
+a Term Auction Facility result.
+
+### What validates it
+
+The numbers are checked against facts the parser never sees:
+
+- `vote_for + vote_against` equals the seated committee size throughout, and
+  tracks real Board composition — 10 during the 2016-17 governor vacancies,
+  9 in early 2022, 12 once Jefferson, Cook and Barr were seated.
+- The 2022 hiking cycle reproduces step for step: 25, 50, 75, 75, 75, 75, 50
+  basis points to 4.25-4.5%.
+- The founding finding holds at corpus scale: 2026-06-17 12-0 hold,
+  2026-07-29 **9-3** hold, 2026-09-16 12-0 **hike**.
+
 ## Status
 
-Working: the corpus engine above, 79 tests, three real statements and two real
-projections tables as fixtures.
-
-On 2026-09-16 the projections module found the actual news of that meeting: the
-median 2027 federal funds projection rose from 3.6% to 4.1% in a single quarter,
-while unemployment projections *fell*. The statement's prose barely moved.
+Working: the corpus engine and the committed dataset above, 136 tests.
 
 Not built yet:
 
-- Backfill driver for the full 2008-present corpus
-- Pre-2016 statement format — older statements have no `by a N-M vote` line, and
-  single-dissenter statements read "Voting against ... **was** X", which the
-  current regex does not match
-- Duplicate-role alignment — ZIRP-era statements reference the target range in
-  several paragraphs, which currently raises `DuplicateRoleError` by design
+- Minutes are fetched but not yet parsed into the corpus
+- SEP backfill — `sep.py` reads a projections table, but only 2026 is committed
 - FRED macro join, to measure how long the Committee's language lags the data
 - Charts and the annotation layer
-- Individual participant dots (this module reads the summary table, not the chart)
+- Individual participant dots (`sep.py` reads the summary table, not the chart)
+- 2008-2015. The engine stops at 2016; extending it is a separate decision,
+  and the pre-2016 listing pages have not been verified.
+
+### Known limitations
+
+- **Roles are single-valued.** Where the Fed fuses two purposes into one
+  paragraph, the more load-bearing role wins and the other is unrepresentable.
+  March 3, 2020 carries its economic assessment and its rate decision in one
+  paragraph; it is tagged `policy`.
+- **Role anchors are calibrated to observed wording.** They are matched against
+  all 89 statements, but a genuinely new phrasing will fall to `unclassified`
+  rather than being silently misfiled. The corpus-level tests are what catch
+  that, not the unit tests.
 
 ## Data and licensing
 
