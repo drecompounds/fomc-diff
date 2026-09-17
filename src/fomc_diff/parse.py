@@ -80,6 +80,15 @@ _DROP_PREFIXES = (
 )
 
 
+# Roles that must appear at most once per statement. Every other role
+# (unclassified, guidance, balance_sheet, mandate, ...) legitimately repeats:
+# episodic paragraphs (COVID, Ukraine, the 2023 banking-stress response) recur,
+# and an expansive statement carries several balance-sheet paragraphs. Defined
+# once here and imported everywhere else so the set cannot drift between the
+# code that enforces it and the tests that check it.
+UNIQUE_ROLES = frozenset({"policy", "economy", "inflation", "vote_for", "vote_against"})
+
+
 class ArticleContainerError(ValueError):
     """Raised when HTML article container is missing or malformed."""
     pass

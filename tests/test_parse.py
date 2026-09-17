@@ -3,10 +3,9 @@ from pathlib import Path
 import pytest
 from fomc_diff.parse import (
     extract_paragraphs, role_for, parse_statement, ArticleContainerError,
-    _opens_with_economic_assessment)
+    _opens_with_economic_assessment, UNIQUE_ROLES)
 
 FIX = Path(__file__).parent / "fixtures"
-UNIQUE_ROLES = ("policy", "economy", "inflation", "vote_for", "vote_against")
 
 def _html(name): return (FIX / name).read_text(encoding="utf-8")
 

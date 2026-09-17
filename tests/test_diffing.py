@@ -64,3 +64,50 @@ def test_duplicate_role_in_new_statement_raises():
         diff_statements(old, new)
     assert "policy" in str(exc_info.value)
     assert "new" in str(exc_info.value)
+
+
+def test_repeated_roles_align_by_occurrence_rather_than_collapsing():
+    """unclassified/guidance/balance_sheet legitimately repeat -- COVID, Ukraine
+    and the 2023 banking-stress paragraphs all land in one statement. Keying by
+    bare role dropped every occurrence but the last, and the guard against that
+    blocked the entire 89-statement backfill on correct input."""
+    old = [
+        _para(0, "unclassified", "first unclassified paragraph"),
+        _para(1, "unclassified", "second unclassified paragraph"),
+    ]
+    new = [
+        _para(0, "unclassified", "first unclassified paragraph"),
+        _para(1, "unclassified", "second unclassified paragraph, revised"),
+    ]
+    rows = diff_statements(old, new)
+    by_role = {r.role: r for r in rows}
+    assert set(by_role) == {"unclassified", "unclassified#1"}
+    assert by_role["unclassified"].change_type == "unchanged"
+    assert by_role["unclassified#1"].change_type == "changed"
+
+
+def test_a_role_appearing_once_then_twice_still_aligns_the_first():
+    """A statement gaining a second guidance paragraph must not cause the
+    original one to read as removed-and-re-added."""
+    old = [_para(0, "guidance", "the committee will monitor incoming data")]
+    new = [
+        _para(0, "guidance", "the committee will monitor incoming data"),
+        _para(1, "guidance", "a brand new second guidance paragraph appears"),
+    ]
+    rows = diff_statements(old, new)
+    by_role = {r.role: r for r in rows}
+    assert set(by_role) == {"guidance", "guidance#1"}
+    assert by_role["guidance"].change_type == "unchanged"
+    assert by_role["guidance#1"].change_type == "added"
+
+
+def test_duplicate_unique_role_still_raises():
+    """Two 'policy' paragraphs remain an error: they would collapse into one
+    entry and lose a paragraph with no warning."""
+    old = [
+        _para(0, "policy", "first policy paragraph"),
+        _para(1, "policy", "second policy paragraph, same role"),
+    ]
+    new = [_para(0, "policy", "a single policy paragraph")]
+    with pytest.raises(DuplicateRoleError):
+        diff_statements(old, new)
