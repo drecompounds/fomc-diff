@@ -108,6 +108,8 @@ def test_september_2026_fixture_end_to_end():
     ("statement_20250917.html", (11, 1)),
     ("statement_20200916.html", (8, 2)),
     ("statement_20160316.html", (9, 1)),
+    ("statement_20160921.html", (7, 3)),   # "each of whom", three dissenters
+    ("statement_20161102.html", (8, 2)),   # "each of whom", two dissenters
 ])
 def test_named_list_vote_counts(name, expected):
     """Counts verified by hand from the fixture text. No statement carries both
@@ -131,6 +133,15 @@ def test_titles_are_not_counted_as_voters():
 def test_counted_era_still_uses_the_printed_line():
     """2026 prints 'by a 9-3 vote'. That branch must not regress."""
     assert parse_vote(_html("statement_20260729.html")) == (9, 3)
+
+
+def test_each_of_whom_does_not_inflate_the_dissent_count():
+    """2016-09-21 and 2016-11-02 introduce the dissenters with 'each of whom'
+    rather than 'who'. Splitting only on ', who' leaves the trailing prose in
+    the name list, where it counts as one extra dissenter -- a wrong number in
+    the project's headline metric, not a crash."""
+    assert parse_vote(_html("statement_20160921.html")) == (7, 3)
+    assert parse_vote(_html("statement_20161102.html")) == (8, 2)
 
 
 # --- Task 6: widen target-range parsing across eras ------------------------

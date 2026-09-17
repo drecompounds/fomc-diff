@@ -59,14 +59,18 @@ def _count_names(segment: str) -> int:
 def _count_dissenters(segment: str) -> int:
     """Count people in an 'against' clause.
 
-    Each dissent group is 'Name[ and Name], who <prose>'. The prose is full of
-    capitalised words ('Committee'), so names must be taken from BEFORE the
-    ', who' rather than matched across the whole clause.
+    Each dissent group is 'Name[ and Name], who <prose>' or, on 2016-09-21 and
+    2016-11-02, 'Name[, Name,] and Name, each of whom <prose>'. The prose is
+    full of capitalised words ('Committee'), so names must be taken from
+    BEFORE the relative-clause opener rather than matched across the whole
+    clause. Anchored on a leading comma so it can't eat a comma inside a name;
+    "of whom" is optional and "who"/"whom" both close it off with \b so it
+    cannot match e.g. "who" inside a longer word.
     """
     total = 0
     for group in segment.split(";"):
         group = re.sub(r"^\s*and\s+", "", group.strip())
-        head = re.split(r",\s*who\b", group)[0]
+        head = re.split(r",\s*(?:each\s+of\s+)?whom?\b", group)[0]
         head = _TITLES.sub("", head).rstrip(". ")
         if not head:
             continue
