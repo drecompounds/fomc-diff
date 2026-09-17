@@ -4,6 +4,7 @@ from __future__ import annotations
 import html as _html
 import re
 
+from .dashes import UNICODE_DASHES
 from .errors import FomcParseError
 from .parse import ArticleContainerError, parse_statement
 
@@ -13,13 +14,13 @@ class MeetingParseError(FomcParseError):
     missing from a statement (e.g. Fed HTML drift), as opposed to a bug."""
 
 
-# The character class is [U+2010-U+2015, ASCII "-"]. The Unicode range
-# U+2010-U+2015 covers the dash variants the Fed's HTML actually uses
-# (hyphen, non-breaking hyphen, figure dash, en dash, em dash, horizontal
-# bar). The trailing ASCII "\-" is load-bearing: U+002D (plain "-") sorts
-# BELOW U+2010, so it is NOT included in that range — removing it breaks
-# plain "by a 12-0 vote".
-_DASH = r"[‐-―\-]"
+# The character class is [U+2010-U+2015, ASCII "-"]. UNICODE_DASHES covers
+# the Unicode dash variants the Fed's HTML actually uses (hyphen,
+# non-breaking hyphen, figure dash, en dash, em dash, horizontal bar). The
+# trailing ASCII "\-" is load-bearing and explicit here: U+002D (plain "-")
+# sorts BELOW U+2010, so it is NOT included in that range — removing it
+# breaks plain "by a 12-0 vote".
+_DASH = rf"[{UNICODE_DASHES}\-]"
 _VOTE = re.compile(rf"by a (\d+)\s*{_DASH}\s*(\d+)\s*vote", re.I)
 # Matches a whole number ("5"), a whole-plus-fraction ("3-1/2"), or a bare
 # fraction ("1/4") — the last is required for ZIRP-era statements
