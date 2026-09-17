@@ -38,6 +38,87 @@ structure of a statement (vote counts, added and removed paragraphs) carries
 information its prose does not, and structure is exactly what deterministic
 code reads better than a model does.
 
+## The dataset
+
+`data/` holds the corpus, regenerable from scratch with
+`python -m fomc_diff.backfill`. Re-running against a warm cache produces
+byte-identical files.
+
+| File | Rows | What it is |
+|---|---|---|
+| `meetings.csv` | 89 | The spine: `meeting_date, statement_type, vote_for, vote_against, target_lower, target_upper, decision` |
+| `statements.csv` | 479 | One row per role-tagged paragraph |
+| `diffs.csv` | 520 | Role-aligned paragraph and word diffs between consecutive meetings |
+| `manifest.csv` | 89 | `url, fetched_at, content_sha256` — a hash of each statement's extracted text, stable across refetches |
+
+89 statements, 2016-01-27 to 2026-09-16: 87 rate decisions (56 holds, 20 hikes,
+11 cuts) and 2 operational Desk directives that carry no rate decision and no
+vote. 45 dissenting votes across 27 meetings.
+
+`decision` is never read from prose. It is computed by comparing each meeting's
+target range against the previous one, which keeps the most important
+categorical column out of reach of wording changes.
+
+Statement URLs are resolved from the Fed's own listing pages by anchor label,
+never built from a date. The suffix is not an identity: `monetary20160127b.htm`
+is the Statement on Longer-Run Goals, published the same day as the January
+policy statement, and December 2008's statement is at `b.htm` while `a.htm` is
+a Term Auction Facility result.
+
+### What validates it
+
+The numbers are checked against facts the parser never sees:
+
+- `vote_for + vote_against` equals the seated committee size throughout, and
+  tracks real Board composition — 10 during the 2016-17 governor vacancies,
+  9 in early 2022, 12 once Jefferson, Cook and Barr were seated.
+- The 2022 hiking cycle reproduces step for step: 25, 50, 75, 75, 75, 75, 50
+  basis points to 4.25-4.5%.
+- The founding finding holds at corpus scale: 2026-06-17 12-0 hold,
+  2026-07-29 **9-3** hold, 2026-09-16 12-0 **hike**.
+
+## Do dissents lead policy?
+
+The dataset's headline question, answered with the discipline the question
+deserves. The rule was written to `config/dissent_lead.yaml` and **committed
+before any result was computed** — the git history is the evidence. All four
+horizons are reported, always. Reproduce with
+`python -m fomc_diff.dissent_lead`.
+
+| horizon | dissent | n | rate | base rate | lift |
+|---|---|---|---|---|---|
+| 1 meeting | lower -> cut | 13 | 54% | 13% | +41 pts |
+| 1 meeting | raise -> hike | 13 | 54% | 23% | +31 pts |
+| 2 meetings | lower -> cut | 13 | 54% | 18% | +36 pts |
+| 2 meetings | raise -> hike | 10 | 70% | 35% | +35 pts |
+| 3 meetings | lower -> cut | 13 | 54% | 23% | +31 pts |
+| 3 meetings | raise -> hike | 10 | 80% | 39% | +41 pts |
+| 4 meetings | lower -> cut | 12 | 58% | 27% | +32 pts |
+| 4 meetings | raise -> hike | 10 | 80% | 43% | +37 pts |
+
+The lift is positive at every horizon. **This is not a claim that dissents
+predict policy**, for three reasons stated plainly:
+
+**The sample is tiny and concentrated.** n is 13 per direction. Esther George
+is 6 of the 13 "raise" dissents; Stephen Miran is 6 of the 13 "lower" ones. The
+whole scored sample comes from **19 distinct meetings**, clustered in two
+episodes — 2016's approach to liftoff, and the 2025-26 cutting debate.
+
+**Meetings are not independent.** The longest run of identical decisions is 15
+meetings, and there are only 29 regime switches in eleven years.
+
+**And there is a cleaner explanation than prediction.** Officials dissent when
+the Committee is near a turning point, because that is when the debate is live.
+A dissent may *mark* a turn rather than lead it. This data cannot separate those
+two readings, and no additional horizon would help — the confound is structural,
+not statistical.
+
+42% of dissents (19 of 45) state no rate preference at all and are excluded
+rather than assigned one. `dissents.csv` records every dissenter individually,
+because dissents within a single meeting point in opposite directions: on
+2019-09-18 Bullard preferred to lower while George and Rosengren preferred to
+maintain.
+
 ## Install
 
 Requires Python 3.11+.
@@ -57,17 +138,24 @@ pytest -q
 from datetime import date
 from pathlib import Path
 
-from fomc_diff.fetch import fetch, statement_url
+from fomc_diff.discover import build_corpus, listing_urls
+from fomc_diff.fetch import fetch
 from fomc_diff.parse import parse_statement
 from fomc_diff.diffing import diff_statements
 from fomc_diff.meetings import parse_vote, parse_target_range, derive_decision
 
+# Resolve statement URLs from the Fed's own listing pages. Never build one
+# from a date -- the URL suffix is not a document identity. See Design rules.
 cache = Path("data/raw")
-jul = fetch(statement_url(date(2026, 7, 29)), cache)
-sep = fetch(statement_url(date(2026, 9, 16)), cache)
+pages = {u: fetch(u, cache).path.read_bytes().decode("utf-8")
+         for u in listing_urls(through_year=2026)}
+corpus = build_corpus(pages, current_year=2026)
 
-jul_html = jul.path.read_text(encoding="utf-8")
-sep_html = sep.path.read_text(encoding="utf-8")
+jul = fetch(corpus[date(2026, 7, 29)], cache)
+sep = fetch(corpus[date(2026, 9, 16)], cache)
+
+jul_html = jul.path.read_bytes().decode("utf-8")
+sep_html = sep.path.read_bytes().decode("utf-8")
 
 print(parse_vote(jul_html))   # (9, 3)
 print(parse_vote(sep_html))   # (12, 0)
@@ -143,45 +231,6 @@ or removed paragraphs are facts the Fed prints. They are read directly.
 | `tables.py` | CSV writers that refuse to write an empty table. |
 
 Design and implementation notes live in `docs/superpowers/`.
-
-## The dataset
-
-`data/` holds the corpus, regenerable from scratch with
-`python -m fomc_diff.backfill`. Re-running against a warm cache produces
-byte-identical files.
-
-| File | Rows | What it is |
-|---|---|---|
-| `meetings.csv` | 89 | The spine: `meeting_date, statement_type, vote_for, vote_against, target_lower, target_upper, decision` |
-| `statements.csv` | 479 | One row per role-tagged paragraph |
-| `diffs.csv` | 520 | Role-aligned paragraph and word diffs between consecutive meetings |
-| `manifest.csv` | 89 | `url, fetched_at, content_sha256` — a hash of each statement's extracted text, stable across refetches |
-
-89 statements, 2016-01-27 to 2026-09-16: 87 rate decisions (56 holds, 20 hikes,
-11 cuts) and 2 operational Desk directives that carry no rate decision and no
-vote. 45 dissenting votes across 27 meetings.
-
-`decision` is never read from prose. It is computed by comparing each meeting's
-target range against the previous one, which keeps the most important
-categorical column out of reach of wording changes.
-
-Statement URLs are resolved from the Fed's own listing pages by anchor label,
-never built from a date. The suffix is not an identity: `monetary20160127b.htm`
-is the Statement on Longer-Run Goals, published the same day as the January
-policy statement, and December 2008's statement is at `b.htm` while `a.htm` is
-a Term Auction Facility result.
-
-### What validates it
-
-The numbers are checked against facts the parser never sees:
-
-- `vote_for + vote_against` equals the seated committee size throughout, and
-  tracks real Board composition — 10 during the 2016-17 governor vacancies,
-  9 in early 2022, 12 once Jefferson, Cook and Barr were seated.
-- The 2022 hiking cycle reproduces step for step: 25, 50, 75, 75, 75, 75, 50
-  basis points to 4.25-4.5%.
-- The founding finding holds at corpus scale: 2026-06-17 12-0 hold,
-  2026-07-29 **9-3** hold, 2026-09-16 12-0 **hike**.
 
 ## Status
 
