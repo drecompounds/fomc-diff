@@ -52,10 +52,19 @@ def test_parse_dissent_unrecognised_direction_is_unclear_not_dropped():
 
 @pytest.mark.parametrize("prev,cur,expected", [
     (3.75, 4.0, "hike"), (3.75, 3.5, "cut"), (3.75, 3.75, "hold"),
-    (None, 3.75, "hold"),
 ])
 def test_derive_decision(prev, cur, expected):
     assert derive_decision(prev, cur) == expected
+
+
+def test_derive_decision_with_no_prior_meeting_raises():
+    """'No previous meeting' and 'no change from the previous meeting' are
+    different facts. Defaulting the former to 'hold' made the corpus's very
+    first row (2016-01-27) 'hold' by luck, not by measurement -- the fix is
+    for the caller to pass a documented prior (backfill.SEED_PRIOR_UPPER)
+    instead of None."""
+    with pytest.raises(MeetingParseError):
+        derive_decision(None, 3.75)
 
 
 # --- regressions found on the live 2026-09-16 statement -------------------

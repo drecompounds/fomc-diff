@@ -196,7 +196,21 @@ def parse_dissent(text: str) -> tuple[list[str], str]:
 
 
 def derive_decision(prev_upper: float | None, cur_upper: float) -> str:
-    """Decision comes from the numbers, never from prose."""
-    if prev_upper is None or cur_upper == prev_upper:
+    """Decision comes from the numbers, never from prose.
+
+    Raises when there is no previous meeting to compare against, rather than
+    defaulting to 'hold': "no prior meeting" and "no change from the prior
+    meeting" are different facts, and conflating them made the corpus's very
+    first row (2016-01-27) 'hold' by default instead of by measurement.
+    Callers that have a documented prior pass its upper bound instead of
+    None (see backfill.SEED_PRIOR_UPPER).
+    """
+    if prev_upper is None:
+        raise MeetingParseError(
+            "no previous meeting to derive a decision from; pass a "
+            "documented prior target-range upper bound instead of None "
+            "rather than defaulting to 'hold'"
+        )
+    if cur_upper == prev_upper:
         return "hold"
     return "hike" if cur_upper > prev_upper else "cut"

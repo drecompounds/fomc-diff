@@ -38,6 +38,11 @@ DIFFS_FIELDS = [
 ]
 MANIFEST_FIELDS = ["meeting_date", "url", "sha256", "fetched_at", "from_cache"]
 
+# The FOMC raised to 0.25-0.50 percent on 2015-12-16, the meeting before this
+# corpus begins. Seeding it makes the first row's decision a measurement
+# rather than a default. Source: FOMC statement, December 16, 2015.
+SEED_PRIOR_UPPER = 0.50
+
 
 def build_rows(
     documents: dict[date, str],
@@ -54,7 +59,11 @@ def build_rows(
     meetings: list[dict] = []
     statements: list[dict] = []
     paras_by_date: dict[date, list] = {}
-    prev_decision_upper: float | None = None
+    # Seeded, not None: derive_decision refuses to default "no prior meeting"
+    # to "hold". 2016-01-27 (this corpus's first meeting) comes out "hold"
+    # because 0.50 == 0.50, a measurement against the documented prior
+    # decision, not a default.
+    prev_decision_upper: float | None = SEED_PRIOR_UPPER
 
     for d in dates:
         html = documents[d]
