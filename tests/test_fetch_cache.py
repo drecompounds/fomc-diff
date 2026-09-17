@@ -3,7 +3,12 @@ import hashlib
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from fomc_diff.fetch import fetch, NonTextContentError, CacheCollisionError
+from fomc_diff.fetch import (
+    fetch,
+    NonTextContentError,
+    CacheCollisionError,
+    CacheCorruptionError,
+)
 import pytest
 
 HTML = "<html><body><p>hello</p></body></html>"
@@ -57,15 +62,23 @@ def test_fetching_twice_returns_same_fetched_at(tmp_path: Path):
         "cache hit must return the sidecar's fetched_at verbatim, not datetime.now()"
     )
 
-def test_cache_hit_with_deleted_sidecar_uses_mtime(tmp_path: Path):
-    """With no sidecar, fetched_at must be derived from the cached file's
-    mtime, not datetime.now(). Proven by setting the file's mtime to a
-    fixed, clearly-old timestamp and asserting the returned value equals
-    that exact mtime-derived ISO string."""
+def test_cache_hit_with_deleted_sidecar_is_refetched_not_trusted(tmp_path: Path):
+    """Formerly: with no sidecar, fetched_at fell back to the cached file's
+    mtime and the (unverifiable) cached bytes were served as-is. That mtime
+    fallback is exactly what let a torn write get served silently -- there
+    was no sidecar hash to catch it.
+
+    New contract (see CacheCorruptionError and rule 4 in the fix): a cache
+    entry with no sidecar cannot be verified, so it is no longer trusted.
+    fetch() re-fetches it instead, still never recomputing fetched_at for an
+    actually-verified hit (see test_fetched_at_still_comes_from_the_sidecar_
+    on_a_verified_hit) -- but this is not a verified hit, it's a fresh fetch,
+    so from_cache is False and fetched_at legitimately comes from now()."""
     s = FakeSession()
     r1 = fetch("https://example.gov/a.htm", tmp_path, session=s, sleep=lambda _: None)
 
-    # Delete the sidecar to force the mtime fallback path.
+    # Delete the sidecar: this entry predates hash recording and can no
+    # longer be verified.
     meta_path = r1.path.with_suffix(r1.path.suffix + ".meta.json")
     meta_path.unlink()
 
@@ -74,12 +87,17 @@ def test_cache_hit_with_deleted_sidecar_uses_mtime(tmp_path: Path):
     os.utime(r1.path, (fixed_epoch, fixed_epoch))
 
     r2 = fetch("https://example.gov/a.htm", tmp_path, session=s, sleep=lambda _: None)
-    assert r2.from_cache is True
-    expected = fixed_dt.isoformat(timespec="seconds")
-    assert r2.fetched_at == expected, (
-        "mtime-fallback path must derive fetched_at from the file's mtime, "
-        "not datetime.now()"
+    assert r2.from_cache is False, (
+        "a sidecar-less cache entry must be re-fetched, not silently served"
     )
+    assert s.calls == 2, "the missing sidecar must trigger a real re-fetch"
+    assert r2.fetched_at != fixed_dt.isoformat(timespec="seconds"), (
+        "fetched_at must not come from the old file's mtime any more"
+    )
+    # And the re-fetch must have healed the cache: a sidecar with a sha256
+    # now exists, so the next hit is a verified one.
+    new_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert new_meta.get("sha256"), "re-fetch must write a sidecar with a recorded hash"
 
 def test_cache_collision_raises_on_url_mismatch(tmp_path: Path):
     s = FakeSession()
@@ -172,3 +190,103 @@ def test_cached_bytes_are_byte_identical_to_what_was_served(tmp_path):
 
     r = fetch("https://example.gov/y.htm", tmp_path, session=S(), sleep=lambda _: None)
     assert r.path.read_bytes() == crlf.encode("utf-8"), "cached file must be byte-faithful to the server body"
+
+
+# --- cache integrity: atomic writes + hash verification on every hit -------
+
+def test_a_corrupted_cache_entry_is_detected_rather_than_served(tmp_path):
+    """A torn write corrupted one cached document and manifest.csv recorded the
+    damaged bytes as ground truth, because a re-run rebuilds the manifest from
+    whatever is on disk. Serving an unverified cache entry is how a silent
+    wrong answer reached the published dataset."""
+    s = FakeSession()
+    r1 = fetch("https://example.gov/a.htm", tmp_path, session=s, sleep=lambda _: None)
+
+    # Simulate a torn write: corrupt the bytes on disk after the sidecar
+    # (with its correct sha256) has already been written.
+    r1.path.write_bytes(b"<html><body><p>MOJIBAKE</p></body></html>")
+
+    with pytest.raises(CacheCorruptionError) as exc_info:
+        fetch("https://example.gov/a.htm", tmp_path, session=s, sleep=lambda _: None)
+
+    msg = str(exc_info.value)
+    assert str(r1.path) in msg or r1.path.name in msg
+    assert r1.sha256 in msg, "expected hash must be named"
+    corrupted_hash = hashlib.sha256(r1.path.read_bytes()).hexdigest()
+    assert corrupted_hash in msg, "actual (corrupted) hash must be named"
+
+
+def test_a_cache_entry_without_a_recorded_hash_is_refetched_not_trusted(tmp_path):
+    """Entries written before hashes were recorded cannot be verified."""
+    s = FakeSession()
+    r1 = fetch("https://example.gov/a.htm", tmp_path, session=s, sleep=lambda _: None)
+
+    meta_path = r1.path.with_suffix(r1.path.suffix + ".meta.json")
+    meta_path.unlink()
+
+    new_html = "<html><body><p>DIFFERENT</p></body></html>"
+
+    class NewResponse:
+        status_code = 200
+        text = new_html
+        content = new_html.encode("utf-8")
+        headers = {"Content-Type": "text/html; charset=utf-8"}
+        def raise_for_status(self): pass
+
+    s2 = FakeSession(response=NewResponse())
+    r2 = fetch("https://example.gov/a.htm", tmp_path, session=s2, sleep=lambda _: None)
+
+    assert r2.from_cache is False
+    assert r2.sha256 == hashlib.sha256(new_html.encode("utf-8")).hexdigest(), (
+        "the new bytes must win over the untrusted, unverifiable old cache entry"
+    )
+    assert r1.path.read_bytes() == new_html.encode("utf-8")
+
+
+def test_fetched_at_still_comes_from_the_sidecar_on_a_verified_hit(tmp_path):
+    """Provenance must not be recomputed as now() on a cache hit -- the
+    original reason the sidecar exists."""
+    s = FakeSession()
+    r1 = fetch("https://example.gov/a.htm", tmp_path, session=s, sleep=lambda _: None)
+
+    fixed = "2020-01-01T00:00:00+00:00"
+    meta_path = r1.path.with_suffix(r1.path.suffix + ".meta.json")
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["fetched_at"] = fixed
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+    r2 = fetch("https://example.gov/a.htm", tmp_path, session=s, sleep=lambda _: None)
+    assert r2.from_cache is True
+    assert r2.fetched_at == fixed, (
+        "a verified cache hit must return the sidecar's fetched_at verbatim"
+    )
+
+
+def test_an_interrupted_write_leaves_no_partial_file_in_the_cache(tmp_path):
+    """Make the session raise midway / simulate failure after the body write
+    begins, and assert no .part file and no half-written cache entry remains
+    that a later run would serve."""
+    from fomc_diff import fetch as fetch_mod
+
+    real_replace = os.replace
+    call_count = {"n": 0}
+
+    def flaky_replace(src, dst):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            # Simulate a crash between the temp write and the atomic
+            # replace of the body file -- the .part file must be left
+            # behind, never the real cache path.
+            raise OSError("simulated crash during atomic replace")
+        return real_replace(src, dst)
+
+    s = FakeSession()
+    import unittest.mock as mock
+    with mock.patch.object(fetch_mod.os, "replace", side_effect=flaky_replace):
+        with pytest.raises(OSError):
+            fetch("https://example.gov/a.htm", tmp_path, session=s, sleep=lambda _: None)
+
+    cache_path = tmp_path / "a.htm"
+    assert not cache_path.exists(), "a failed replace must not leave a half-written cache entry"
+    leftover_parts = list(tmp_path.glob("*.part"))
+    assert leftover_parts == [], f"a .part file was left behind: {leftover_parts}"

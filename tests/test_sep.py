@@ -73,6 +73,15 @@ def test_central_tendency_and_range_split_on_the_unicode_en_dash():
     assert (r.range_low, r.range_high) == (2.1, 2.6)
 
 
+def test_ascii_hyphen_pair_parses():
+    """_pair's own docstring example ('2.2-2.4' -> (2.2, 2.4)) used to be
+    false: _PAIR_DASH omitted the ASCII hyphen that meetings._DASH carries
+    (both used to hand-maintain separate copies of the same Unicode range),
+    so a plain-hyphen pair raised SepParseError instead of parsing."""
+    from fomc_diff.sep import _pair
+    assert _pair("2.2-2.4") == (2.2, 2.4)
+
+
 def test_core_pce_longer_run_is_none_not_zero_and_does_not_raise():
     """The Fed publishes no longer-run core PCE projection. That cell is
     legitimately empty; it must come back None, never 0.0, never an exception."""

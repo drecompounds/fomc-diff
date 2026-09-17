@@ -10,14 +10,17 @@ import re
 from dataclasses import dataclass
 from datetime import date
 
+from .dashes import UNICODE_DASHES
 from .errors import FomcParseError
 
 BASE = "https://www.federalreserve.gov"
 
-# Cells separate a low/high pair with U+2013 EN DASH, not an ASCII hyphen.
-# Same character family as the &#8211; that made parse_vote find no vote line
-# on the live 2026-09-16 statement.
-_PAIR_DASH = r"[‐-―]"
+# Cells separate a low/high pair with U+2013 EN DASH as often as an ASCII
+# hyphen -- same character family as the &#8211; that made parse_vote find no
+# vote line on the live 2026-09-16 statement. The trailing ASCII "\-" is
+# explicit and load-bearing, same as meetings._DASH: without it, a pair
+# written with a plain hyphen ("2.2-2.4") raises instead of parsing.
+_PAIR_DASH = rf"[{UNICODE_DASHES}\-]"
 
 _VARIABLES = {
     "change in real gdp": "gdp",

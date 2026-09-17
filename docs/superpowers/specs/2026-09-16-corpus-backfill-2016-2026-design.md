@@ -194,14 +194,53 @@ Separate from the vote collision, 34 documents carry two paragraphs containing
   to **the target range for the federal funds rate**, the Committee will
   assess..."
 
-**Fix.** `policy` requires a decision verb as well as the phrase, as a regex —
-`Committee decided (today )?to` — because the literal substring "Committee
-decided to" misses 2020-03-03's "decided **today** to lower". The
+**Fix.** `policy` requires a decision verb as well as the phrase, and the
 reaction-function paragraph takes the `guidance` role.
+
+**Correction.** An earlier draft of this spec justified using a regex by
+claiming the literal substring "Committee decided to" misses 2020-03-03's
+"decided **today** to lower". That is **false**: "to" is a prefix of "today",
+so the literal matches by coincidence. The original probe showed 2020-03-03
+yielding no `policy` paragraph because Defect 1 was deleting that paragraph
+outright — a Defect 1 symptom misattributed to the anchor.
+
+The regex `Committee decided\s+(?:today\s+)?to` is kept for whitespace
+robustness, not because the literal fails here, and the test covering it is
+named for what it actually guards.
 
 Because `policy` becomes strictly narrower, an era phrasing the decision
 differently produces zero `policy` paragraphs rather than a wrong one, and that
 raises.
+
+## Defect 6 - the target range parser reads raw HTML
+
+`parse_target_range` fails on 15 of 89, for three measured causes. (This spec
+said "two" until implementation found the third; the count of causes was
+itself guessed rather than measured -- the same error documented elsewhere
+in this spec.)
+
+1. **U+2011 NON-BREAKING HYPHEN** in fractions. The Fed writes "4‑1/4" with
+   U+2011, not ASCII hyphen, and mixes the two inside a single sentence
+   ("at 1‑1/2 to 1-3/4 percent"). The number pattern and `parse_fraction`
+   both accept only ASCII `-`.
+2. **Inline markup inside the phrase.** The function runs against raw HTML, and
+   the 2026-09-16 statement reads `rate by 1/4 percentage point<strong>
+   </strong>to 3-3/4<strong> </strong>to 4 percent`. The text is pure ASCII; the
+   tags alone defeat the match.
+
+3. **A comma inside the by-clause.** 2020-03-03 reads "by 1/2 percentage
+   point**,** to 1 to 1-1/4 percent". Unrelated to dashes or markup; found
+   during implementation, not during design.
+
+Cause 2 is the **third instance of one defect class**: structured extraction run
+against raw HTML instead of cleaned paragraph text. `parse_vote` needed
+`_html.unescape` for `&#8211;`; `sep.py` needed an en-dash character class for
+table cells; now this. The fix is structural - route extraction through
+`parse_statement` - rather than widening another pattern and waiting for the
+fourth instance.
+
+Note the ZIRP range ("0 to 1/4 percent") is **not** a cause. It parses correctly
+today. It stays in the fixture set as a regression guard.
 
 ## Role taxonomy
 

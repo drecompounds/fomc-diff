@@ -16,6 +16,48 @@ _WS = re.compile(r"\s+")
 
 _DATE_LINE = re.compile(r"^[A-Z][a-z]+ \d{1,2}, \d{4}$")
 
+# "decided to" is not enough: 2020-03-03 reads "decided TODAY to lower".
+_DECIDED = re.compile(r"Committee\s+decided\s+(?:today\s+)?to", re.I)
+_DIRECTS = re.compile(r"directs the Desk", re.I)
+
+# The opening economic-assessment paragraph, matched as a START-of-paragraph
+# anchor rather than a loose substring: "economic activity" also appears
+# inside the reaction-function/outlook paragraphs on 9 fixtures, so a bare
+# `"economic activity" in text` mints duplicate `economy` roles there.
+_ECONOMY_OPENINGS = (
+    "Information received since the Federal Open Market Committee met in",
+    "Recent indicators",
+    "Indicators of economic activity",
+    "Available indicators suggest",
+    "Economic activity",
+    "Although swings in net exports",
+    "Although overall economic activity",
+    "Overall economic activity",
+    "The fundamentals of the U.S. economy",
+    # Stems, deliberately short. Each time these were written as longer
+    # phrases the Fed's next rewording defeated them: "is causing" missed
+    # "has harmed", and "With progress on vaccinations" missed a bare
+    # "Progress on vaccinations". Match the shortest prefix that is still
+    # unambiguous.
+    "The coronavirus outbreak",
+    "The COVID-19 pandemic",
+    "With progress on vaccinations",
+    "Progress on vaccinations",
+)
+
+
+def _opens_with_economic_assessment(text: str) -> bool:
+    """True when `text` opens with one of the Fed's recurring economic-
+    assessment phrasings.
+
+    A single source of truth for "is this paragraph the opening economic
+    assessment" -- `role_for` uses it to assign `economy`, and the fused-
+    paragraph exemption in the test suite (a statement like 2020-03-03, whose
+    `policy` paragraph absorbs the assessment because the two are welded into
+    one <p>) uses it too. Two copies of this list would drift.
+    """
+    return text.startswith(_ECONOMY_OPENINGS)
+
 # The Fed glues its release line -- and the "Share" widget -- onto the FRONT of
 # the first body paragraph. In 86 of the 89 statements from 2016-2026 the
 # opening economic assessment lives inside that same <p>, and on 2020-03-03 the
@@ -36,6 +78,15 @@ _DROP_PREFIXES = (
     "Last Update",
     "Share",
 )
+
+
+# Roles that must appear at most once per statement. Every other role
+# (unclassified, guidance, balance_sheet, mandate, ...) legitimately repeats:
+# episodic paragraphs (COVID, Ukraine, the 2023 banking-stress response) recur,
+# and an expansive statement carries several balance-sheet paragraphs. Defined
+# once here and imported everywhere else so the set cannot drift between the
+# code that enforces it and the tests that check it.
+UNIQUE_ROLES = frozenset({"policy", "economy", "inflation", "vote_for", "vote_against"})
 
 
 class ArticleContainerError(ValueError):
@@ -114,18 +165,38 @@ def _strip_boilerplate(text: str) -> str:
 
 def role_for(text: str) -> str:
     # The vote-announcement line ("...approved the following statement for
-    # release by a 9-3 vote:") is where parse_vote reads the count. It was
-    # invisible until the release-line boilerplate stopped swallowing it.
+    # release by a 9-3 vote:") is where parse_vote reads the count.
     if "approved the following statement for release" in text:
         return "vote"
+    # BOTH vote checks MUST precede `policy`. In 2016-2025 the voting paragraph
+    # contains "target range for the federal funds rate", because the
+    # dissenter's preferred alternative names it -- so `policy` would swallow
+    # the entire vote record. This is the same trap that already required
+    # dissent-before-policy; its scope was simply too narrow.
+    if text.startswith("Voting for"):
+        return "vote_for"
     if text.startswith("Voting against"):
-        return "dissent"
-    if "target range for the federal funds rate" in text:
+        return "vote_against"
+    if _DECIDED.search(text) and "target range for the federal funds rate" in text:
         return "policy"
+    if _DIRECTS.search(text):
+        return "directive"
+    if ("In determining the timing and size of future adjustments" in text
+            or "In assessing the appropriate stance of monetary policy" in text):
+        return "guidance"
+    if "path of the economy" in text:
+        return "outlook_risk"
+    if "committed to using its full range of tools" in text:
+        return "commitment"
+    if ("seeks to achieve maximum employment" in text
+            or "Consistent with its statutory mandate" in text):
+        return "mandate"
+    if "reinvest" in text or "holdings of Treasury securities" in text:
+        return "balance_sheet"
+    if _opens_with_economic_assessment(text):
+        return "economy"
     if text.startswith("Inflation"):
         return "inflation"
-    if "Economic activity" in text:
-        return "economy"
     return "unclassified"
 
 

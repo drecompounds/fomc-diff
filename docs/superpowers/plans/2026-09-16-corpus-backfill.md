@@ -454,7 +454,7 @@ git commit -m "Split vote roles and check them before policy"
 
 **Context:** 34 documents carry two paragraphs containing "target range for the federal funds rate": the decision, and the reaction function ("In determining the timing and size of future adjustments to..."). They are different paragraphs, not duplicates. `policy` must require a decision verb.
 
-The literal substring `"Committee decided to"` is NOT sufficient — 2020-03-03 reads "decided **today** to lower". Use a regex.
+Use a regex `Committee decided\s+(?:today\s+)?to` for whitespace robustness. **Note:** an earlier version of this plan claimed the literal substring `"Committee decided to"` misses 2020-03-03's "decided today to lower". That is false — "to" is a prefix of "today", so the literal matches coincidentally. Do not write a disable-proof asserting otherwise; it cannot go red.
 
 **This task carries the one open design question in the spec: the `economy` anchor.** Its wording varies ("Information received since the Federal Open Market Committee met in...", "Recent indicators suggest that...", "Indicators of economic activity and employment...", "Available indicators suggest..."). Too loose and it collides with other paragraphs; too tight and it misses eras. Steps 3-4 iterate until Step 5's two corpus-level tests pass. Those tests are the gate, not a guess made up front.
 
@@ -748,7 +748,13 @@ git commit -m "Derive vote counts from the named roll for 2016-2025"
 - Modify: `src/fomc_diff/meetings.py` (`_RANGE`)
 - Modify: `tests/test_meetings.py`
 
-**Context:** `parse_target_range` fails on 15 of 89 documents. Causes observed: the ZIRP-era "0 to 1/4 percent" (a bare `0` low bound), and decision phrasings the current regex does not admit.
+**Context:** `parse_target_range` fails on 15 of 89 documents. The spec's stated cause — ZIRP's "0 to 1/4 percent" — is **wrong**; 2021-12-15 parses correctly today. The two real causes, both measured:
+
+1. **U+2011 NON-BREAKING HYPHEN.** The Fed writes "1‑1/2" and "4‑1/4" with U+2011, not ASCII hyphen, inconsistently and sometimes twice in one sentence ("at 1‑1/2 to 1-3/4 percent" mixes both). `_NUM` admits only `\d+-\d+/\d+` with ASCII `-`, and `parse_fraction` splits on ASCII `-` too. **Both** must accept the U+2010-U+2015 family. `meetings.py` already has a `_DASH` class for exactly this reason on `_VOTE`; reuse it rather than writing a second one.
+
+2. **Inline markup.** `parse_target_range` takes **raw HTML**, and 2026-09-16 reads `rate by 1/4 percentage point<strong> </strong>to 3-3/4<strong> </strong>to 4 percent`. The tags sit inside the phrase and break the match even though the text is pure ASCII.
+
+Cause 2 is the important one: it is the third occurrence of the same defect class (`parse_vote` needed `_html.unescape`; `sep.py` needed the en-dash class). **Fix it structurally** — `parse_target_range` should read the `policy` paragraph's already-cleaned text via `parse_statement` rather than raw HTML, the same way Task 5's `parse_vote` named branch does. Keep accepting a raw-HTML string at the public boundary so existing callers do not break.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -761,9 +767,32 @@ git commit -m "Derive vote counts from the named roll for 2016-2025"
     ("statement_20260916.html", (3.75, 4.0)),
 ])
 def test_target_range_across_eras(name, expected):
-    """ZIRP prints '0 to 1/4 percent' -- a bare 0 low bound the original
-    pattern rejected."""
+    """Two real causes, both measured. 2020-01-29 and 2025-09-17 write the
+    fraction with U+2011 NON-BREAKING HYPHEN, which the ASCII-only _NUM
+    rejects. 2026-09-16 is pure ASCII but carries '<strong> </strong>' INSIDE
+    the phrase, which breaks a regex run against raw HTML.
+
+    2021-12-15 (ZIRP, '0 to 1/4 percent') is in this list as a REGRESSION
+    guard: it already passes today, and the spec was wrong to blame it."""
     assert parse_target_range(_html(name)) == expected
+
+
+def test_non_breaking_hyphen_is_read_as_a_fraction():
+    """Isolates cause 1 from cause 2, so a fix for one cannot appear to fix
+    both. U+2011 must parse identically to ASCII hyphen."""
+    from fomc_diff.meetings import parse_fraction
+    assert parse_fraction("1‑1/2") == 1.5
+    assert parse_fraction("1-1/2") == 1.5
+
+
+def test_inline_markup_inside_the_phrase_does_not_defeat_the_match():
+    """Isolates cause 2. This exact shape is live in the 2026-09-16 statement."""
+    html = ('<div id="article"><p>The Committee decided to raise the target '
+            'range for the federal funds rate by 1/4 percentage point'
+            '<strong> </strong>to 3-3/4<strong> </strong>to 4 percent.</p>'
+            '<p>Economic activity is expanding.</p>'
+            '<p>Inflation remains elevated.</p></div>')
+    assert parse_target_range(html) == (3.75, 4.0)
 
 
 def test_unparseable_range_raises_rather_than_returning_zero():
@@ -777,13 +806,43 @@ def test_unparseable_range_raises_rather_than_returning_zero():
 
 Expected: FAIL on at least the ZIRP and 2020 cases.
 
-- [ ] **Step 3: Implement** — widen `_NUM` and `_RANGE`
+- [ ] **Step 3: Implement**
 
-`_NUM` already admits whole, whole-plus-fraction, and bare fractions. Confirm it also admits a bare `0`. Widen `_RANGE` so the decision verb is optional and both "at" and "to" introduce the range, keeping the existing "by X percentage point(s) to" form working. Verify against all five fixtures before moving on.
+1. Reuse the existing `_DASH` class in `meetings.py` (already `[U+2010-U+2015, ASCII -]`, with a comment explaining why the trailing ASCII `\-` is load-bearing) inside `_NUM`, so `\d+-\d+/\d+` becomes dash-family-aware. **Do not write a second dash class.**
+2. Make `parse_fraction` split on the same `_DASH` class instead of ASCII `-`.
+3. Make `parse_target_range` read the `policy` paragraph's cleaned text:
+
+```python
+def parse_target_range(text: str) -> tuple[float, float]:
+    """Accepts raw HTML or plain text.
+
+    Raw HTML is routed through parse_statement first: the Fed puts
+    "<strong> </strong>" INSIDE the phrase (live in the 2026-09-16 statement),
+    and a regex run against raw markup cannot match across it.
+    """
+    haystack = text
+    if "<" in text:
+        try:
+            paras = parse_statement(text)
+        except ArticleContainerError:
+            paras = []
+        haystack = " ".join(
+            p.text for p in paras if p.role in ("policy", "directive")) or text
+    m = _RANGE.search(haystack)
+    if not m:
+        raise MeetingParseError("no target range found")
+    return parse_fraction(m.group(1)), parse_fraction(m.group(2))
+```
+
+Note `parse_statement` is already imported by Task 5; `parse.py` imports nothing from `meetings.py`, so there is no import cycle.
 
 - [ ] **Step 4: Run the FULL suite** — expected: all pass.
 
-- [ ] **Step 5: Disable-proof** — narrow `_NUM` back to exclude a bare `0`; confirm the ZIRP case fails. Restore.
+- [ ] **Step 5: Disable-proof — each cause separately**
+
+Revert `_NUM` to ASCII-only `-`; confirm `test_non_breaking_hyphen_is_read_as_a_fraction` and the 2025-09-17 case fail, while 2026-09-16 still passes. Restore. Then make `parse_target_range` search `text` directly again; confirm `test_inline_markup_inside_the_phrase_does_not_defeat_the_match` and 2026-09-16 fail, while 2025-09-17 still passes. Restore.
+
+Proving them independently matters: a single fix that made all five pass would leave you unable to tell which cause it addressed.
 
 - [ ] **Step 6: Commit**
 
@@ -874,11 +933,40 @@ Write `build_rows` to, for each date in sorted order: parse paragraphs; determin
 
 - [ ] **Step 4: Run the FULL suite** — expected: all pass.
 
-- [ ] **Step 5: Disable-proof**
+- [ ] **Step 5: Add the year-contiguity check to `run()`**
 
-Make `statement_type` always `"decision"`. Confirm `test_operational_statements_are_labelled_and_need_no_vote` fails. Restore.
+Pre-flight Finding 1: `build_corpus`'s per-year minimum counts only years that
+APPEAR. A year missing entirely — a listing page that failed to fetch, or whose
+layout changed so no anchor matched — produces no key, so the guard never
+inspects it. `run()` is the only caller that knows the full intended page set,
+so the check belongs here:
 
-- [ ] **Step 6: Run the real backfill and commit the data**
+```python
+years = {d.year for d in corpus}
+expected = set(range(discover.FIRST_YEAR, current_year + 1))
+missing = expected - years
+if missing:
+    raise DiscoveryError(
+        f"no statements discovered for {sorted(missing)}; a listing page "
+        "probably failed to parse. Refusing to write a corpus with a hole in it.")
+```
+
+```python
+def test_a_missing_year_is_refused_rather_than_written():
+    """A year absent entirely produces no per-year count, so build_corpus's
+    minimum cannot see it. Without this, a failed listing page ships a corpus
+    with a silent hole."""
+    import pytest
+    from fomc_diff.discover import DiscoveryError
+    with pytest.raises(DiscoveryError, match="2017"):
+        _run_with_corpus({date(2016, 3, 16): "...", date(2026, 9, 16): "..."})
+```
+
+- [ ] **Step 6: Disable-proof**
+
+Make `statement_type` always `"decision"`. Confirm `test_operational_statements_are_labelled_and_need_no_vote` fails. Restore. Then remove the contiguity check and confirm `test_a_missing_year_is_refused_rather_than_written` fails. Restore.
+
+- [ ] **Step 7: Run the real backfill and commit the data**
 
 ```bash
 PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe -m fomc_diff.backfill --out data/
