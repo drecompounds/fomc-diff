@@ -38,8 +38,28 @@ _RANGE = re.compile(
     rf"(?:by\s+[\d/\- ]+percentage\s+points?,?\s+)?"
     rf"(?:at|to)\s+({_NUM})\s+to\s+({_NUM})\s+percent",
     re.I)
-_DISSENT = re.compile(r"were (.+?), who (.+)$", re.S)
-_DIRECTIONS = ("raise", "lower", "maintain")
+# Where an against-clause's group-splitting begins: after "Voting against
+# ... was/were", optionally followed by a colon (2016's "were:"). Deliberately
+# NOT anchored to "the action"/"this action" the way _VOTE_AGAINST_OPEN is --
+# 2026 statements write "Voting against the monetary policy action", and a
+# non-greedy ".*?" reaches the first "was"/"were" regardless of what sits
+# between "against" and it.
+_DISSENT_OPEN = re.compile(r"Voting against\b.*?\b(?:were|was):?\s*", re.I | re.S)
+# Real corpus trigger phrases for a dissenter's OWN stated rate preference,
+# read off the actual "Voting against" clauses across 2011-2026 (not
+# guessed): "preferred/prefers [at this meeting] to raise/lower/reduce/
+# maintain" and "preferred no change". "reduce" is 2020-03-15's word for
+# "lower". Deliberately anchored on "preferred"/"prefers" immediately
+# governing the rate verb -- a dissenter who "supported maintaining the
+# target range but did not support inclusion of an easing bias" (2026-04-29)
+# or "expects that it will be appropriate to maintain" (2020-09-16) is NOT
+# stating a rate preference at all; loosening this to a bare "maintain"/
+# "raise"/"lower" substring search would fabricate a direction for them.
+_DIRECTION_RE = re.compile(
+    r"prefer(?:red|s)\s+(?:at this meeting\s+)?"
+    r"(?:to\s+(raise|lower|reduce|maintain)\b|(no\s+change)\b)",
+    re.I)
+_DIRECTION_WORD = {"raise": "raise", "lower": "lower", "reduce": "lower", "maintain": "maintain"}
 
 _TITLES = re.compile(
     r",\s*(?:Vice\s+Chairman|Vice\s+Chair|Chairman|Chair)\b", re.I)
@@ -57,26 +77,50 @@ def _count_names(segment: str) -> int:
     return len([p for p in parts if p.strip()])
 
 
-def _count_dissenters(segment: str) -> int:
-    """Count people in an 'against' clause.
+def _split_dissent_groups(segment: str) -> list[tuple[str, str]]:
+    """Split an against-clause segment (already past 'were'/'was') into one
+    (head, tail) pair per dissent group.
 
     Each dissent group is 'Name[ and Name], who <prose>' or, on 2016-09-21 and
-    2016-11-02, 'Name[, Name,] and Name, each of whom <prose>'. The prose is
-    full of capitalised words ('Committee'), so names must be taken from
-    BEFORE the relative-clause opener rather than matched across the whole
-    clause. Anchored on a leading comma so it can't eat a comma inside a name;
-    "of whom" is optional and "who"/"whom" both close it off with \b so it
-    cannot match e.g. "who" inside a longer word.
+    2016-11-02, 'Name[, Name,] and Name, each of whom <prose>', with multiple
+    groups joined by ';' when a meeting's dissenters split into more than one
+    direction (2019-09-18, 2026-04-29). The prose is full of capitalised words
+    ('Committee'), so names must be taken from BEFORE the relative-clause
+    opener rather than matched across the whole clause. The cut is anchored on
+    a leading comma so it can't eat a comma inside a name; "of whom" is
+    optional and "who"/"whom" both close it off with \\b so it cannot match
+    e.g. "who" inside a longer word.
+
+    `head` is the raw name text (titles still embedded, caller's job to
+    strip); `tail` is everything after the relative-clause opener, which is
+    where a dissenter's own preferred direction is stated (or absent, when
+    it's `unclear`). A group with no relative-clause opener at all yields
+    `tail = ""`.
+
+    This is the ONE place that group-splitting rule lives: `_count_dissenters`
+    (a vote count) and `parse_dissent` (names + direction) both call it rather
+    than each carrying its own copy -- two divergent copies of this rule
+    already produced a wrong vote count once (2016's "each of whom").
     """
-    total = 0
+    groups = []
     for group in segment.split(";"):
         group = re.sub(r"^\s*and\s+", "", group.strip())
-        head = re.split(r",\s*(?:each\s+of\s+)?whom?\b", group)[0]
-        head = _TITLES.sub("", head).rstrip(". ")
-        if not head:
-            continue
-        total += len([p for p in re.split(r"\s+and\s+|,", head) if p.strip()])
-    return total
+        parts = re.split(r",\s*(?:each\s+of\s+)?whom?\b", group, maxsplit=1)
+        head = parts[0]
+        tail = parts[1] if len(parts) > 1 else ""
+        groups.append((head, tail))
+    return groups
+
+
+def _group_names(head: str) -> list[str]:
+    """Names from one dissent group's head text, titles stripped."""
+    head = _TITLES.sub("", head).rstrip(". ")
+    return [p.strip() for p in re.split(r"\s+and\s+|,", head) if p.strip()]
+
+
+def _count_dissenters(segment: str) -> int:
+    """Count people in an 'against' clause. See `_split_dissent_groups`."""
+    return sum(len(_group_names(head)) for head, _tail in _split_dissent_groups(segment))
 
 
 def parse_fraction(s: str) -> float:
@@ -181,19 +225,64 @@ def parse_target_range(text: str) -> tuple[float, float]:
     return parse_fraction(m.group(1)), parse_fraction(m.group(2))
 
 
-def parse_dissent(text: str) -> tuple[list[str], str]:
-    m = _DISSENT.search(text)
+def dissent_clause(paras: list) -> str | None:
+    """The raw 'Voting against ...' clause text for a statement's
+    paragraphs, or None when the statement has no against-clause (a
+    unanimous vote).
+
+    Most statements print the against-clause as its own 'vote_against'
+    paragraph, but ~10 (2016, 2019, 2025) weld it onto the end of the
+    'vote_for' paragraph instead -- split off here by finding the literal
+    "Voting against" that `role_for` only recognises when it OPENS a
+    paragraph.
+    """
+    against_text = next((p.text for p in paras if p.role == "vote_against"), None)
+    if against_text is not None:
+        return against_text
+    for_text = next((p.text for p in paras if p.role == "vote_for"), None)
+    if for_text is not None:
+        halves = re.split(r"Voting against", for_text, maxsplit=1, flags=re.I)
+        if len(halves) > 1:
+            return "Voting against" + halves[1]
+    return None
+
+
+def parse_dissent(text: str) -> list[tuple[str, str]]:
+    """One (name, direction) row per dissenter in an against-clause.
+
+    Dissents within a single meeting can point in opposite directions
+    (2019-09-18: Bullard preferred to lower while George and Rosengren
+    preferred to maintain) -- this is why the return shape is a row per
+    dissenter, not one direction per clause. `direction` is `unclear`,
+    never a guess, when a group's own prose states no rate preference at
+    all (2026-04-29's second group objects to bias-language inclusion, not
+    the rate; 2020-09-16's Kaplan and Kashkari object to forward-guidance
+    wording).
+    """
+    m = _DISSENT_OPEN.search(text)
     if not m:
         raise MeetingParseError("no dissent clause found")
-    raw_names, tail = m.group(1), m.group(2)
-    names = [n.strip() for n in re.split(r",\s*and\s+|,\s*|\s+and\s+", raw_names)
-             if n.strip()]
-    direction = "unclear"
-    for d in _DIRECTIONS:
-        if re.search(rf"preferred to {d}\b", tail):
-            direction = d
-            break
-    return names, direction
+    segment = text[m.end():]
+    rows: list[tuple[str, str]] = []
+    for head, tail in _split_dissent_groups(segment):
+        names = _group_names(head)
+        if not names:
+            continue
+        direction = _classify_direction(tail)
+        rows.extend((name, direction) for name in names)
+    if not rows:
+        raise MeetingParseError("no dissenters found in against-clause")
+    return rows
+
+
+def _classify_direction(tail: str) -> str:
+    m = _DIRECTION_RE.search(tail)
+    if not m:
+        return "unclear"
+    word = m.group(1)
+    if word is None:
+        return "maintain"  # matched the "no change" alternative
+    return _DIRECTION_WORD[word.lower()]
 
 
 def derive_decision(prev_upper: float | None, cur_upper: float) -> str:

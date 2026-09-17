@@ -2,9 +2,9 @@ from pathlib import Path
 import pytest
 from fomc_diff.meetings import (
     parse_fraction, parse_vote, parse_target_range, parse_dissent,
-    derive_decision, MeetingParseError,
+    dissent_clause, derive_decision, MeetingParseError,
 )
-from fomc_diff.parse import ArticleContainerError
+from fomc_diff.parse import ArticleContainerError, parse_statement
 
 FIX = Path(__file__).parent / "fixtures"
 def _html(name): return (FIX / name).read_text(encoding="utf-8")
@@ -40,15 +40,73 @@ def test_parse_dissent_names_and_direction():
             "Neel Kashkari, and Lorie K. Logan, who preferred to raise the "
             "target range for the federal funds rate by 1/4 percentage point "
             "at this meeting.")
-    names, direction = parse_dissent(text)
-    assert names == ["Beth M. Hammack", "Neel Kashkari", "Lorie K. Logan"]
-    assert direction == "raise"
+    rows = parse_dissent(text)
+    assert rows == [
+        ("Beth M. Hammack", "raise"),
+        ("Neel Kashkari", "raise"),
+        ("Lorie K. Logan", "raise"),
+    ]
 
 def test_parse_dissent_unrecognised_direction_is_unclear_not_dropped():
     text = "Voting against the monetary policy action were Jane Doe, who abstained."
-    names, direction = parse_dissent(text)
-    assert names == ["Jane Doe"]
-    assert direction == "unclear"
+    rows = parse_dissent(text)
+    assert rows == [("Jane Doe", "unclear")]
+
+
+# --- Milestone 1: dissent direction, one row per dissenter -----------------
+
+def _dissent_rows(name):
+    paras = parse_statement(_html(name))
+    clause = dissent_clause(paras)
+    assert clause is not None
+    return parse_dissent(clause)
+
+
+def test_dissent_direction_2019_09_18_splits_into_opposite_directions():
+    """The multi-direction case that motivates the whole schema: three
+    dissenters against one cut, split into two directions by ';'."""
+    assert _dissent_rows("statement_20190918.html") == [
+        ("James Bullard", "lower"),
+        ("Esther L. George", "maintain"),
+        ("Eric S. Rosengren", "maintain"),
+    ]
+
+
+def test_dissent_direction_2025_09_17_singular_was():
+    """'Voting against this action WAS Stephen I. Miran' -- the singular
+    clause the old 'were ..., who ...' regex could never match."""
+    assert _dissent_rows("statement_20250917.html") == [("Stephen I. Miran", "lower")]
+
+
+def test_dissent_direction_2016_09_21_each_of_whom():
+    """The 'each of whom' clause form that already caused a wrong vote
+    count once; all three dissenters share one direction here."""
+    rows = _dissent_rows("statement_20160921.html")
+    assert [name for name, _ in rows] == [
+        "Esther L. George", "Loretta J. Mester", "Eric Rosengren",
+    ]
+    assert {direction for _, direction in rows} == {"raise"}
+
+
+def test_dissent_direction_unclear_is_never_a_guess():
+    """2020-09-16: both dissenters object to forward-guidance wording, not
+    to the rate itself -- neither states a rate preference, so both must
+    come back 'unclear', not a fabricated 'maintain' scraped from their
+    prose mentioning 'maintain' in a different sense."""
+    rows = _dissent_rows("statement_20200916.html")
+    assert [name for name, _ in rows] == ["Robert S. Kaplan", "Neel Kashkari"]
+    assert {direction for _, direction in rows} == {"unclear"}
+
+
+@pytest.mark.parametrize("name,vote_against", [
+    ("statement_20160921.html", 3),
+    ("statement_20161102.html", 2),
+    ("statement_20190918.html", 3),
+    ("statement_20200916.html", 2),
+    ("statement_20250917.html", 1),
+])
+def test_dissent_row_count_matches_vote_against_per_fixture(name, vote_against):
+    assert len(_dissent_rows(name)) == vote_against
 
 @pytest.mark.parametrize("prev,cur,expected", [
     (3.75, 4.0, "hike"), (3.75, 3.5, "cut"), (3.75, 3.75, "hold"),

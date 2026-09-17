@@ -25,13 +25,13 @@ def test_operational_statements_are_labelled_and_need_no_vote():
     """2020-03-23 is a Desk directive with no rate decision. Requiring a
     policy paragraph would either raise on it or file it as a rate
     decision."""
-    meetings, _, _ = build_rows(_docs("20200323"))
+    meetings, _, _, _ = build_rows(_docs("20200323"))
     assert meetings[0]["statement_type"] == "operational"
     assert meetings[0]["vote_for"] is None
 
 
 def test_decision_statements_carry_vote_and_range():
-    meetings, _, _ = build_rows(_docs("20250917"))
+    meetings, _, _, _ = build_rows(_docs("20250917"))
     row = meetings[0]
     assert row["statement_type"] == "decision"
     assert (row["vote_for"], row["vote_against"]) == (11, 1)
@@ -59,22 +59,57 @@ def test_decision_is_derived_from_the_range_not_the_prose():
     meeting and got the direction over the longer span backwards.) The
     point of the test survives unchanged: decision must come from comparing
     target_upper values, not from parsing "raise"/"lower" out of the prose."""
-    meetings, _, _ = build_rows(_docs("20250917", "20260916"))
+    meetings, _, _, _ = build_rows(_docs("20250917", "20260916"))
     by_date = {m["meeting_date"]: m for m in meetings}
     assert by_date[date(2026, 9, 16)]["decision"] == "cut"
 
 
 def test_diffs_are_produced_for_consecutive_pairs_only():
-    _, _, diffs = build_rows(_docs("20260617", "20260729", "20260916"))
+    _, _, diffs, _ = build_rows(_docs("20260617", "20260729", "20260916"))
     pairs = {(d["from_date"], d["to_date"]) for d in diffs}
     assert (date(2026, 6, 17), date(2026, 9, 16)) not in pairs
     assert (date(2026, 6, 17), date(2026, 7, 29)) in pairs
 
 
 def test_statements_table_has_one_row_per_paragraph():
-    meetings, statements, _ = build_rows(_docs("20250917"))
+    meetings, statements, _, _ = build_rows(_docs("20250917"))
     assert len(statements) == len(parse_statement(_html("statement_20250917.html")))
     assert all(s["meeting_date"] == date(2025, 9, 17) for s in statements)
+
+
+# --- Milestone 1: dissents.csv -----------------------------------------
+
+def test_dissents_table_has_one_row_per_dissenter_and_splits_direction():
+    """2019-09-18: three dissenters against one cut, in two directions.
+    Exercises build_rows end-to-end (not just parse_dissent in isolation)."""
+    _, _, _, dissents = build_rows(_docs("20190918"))
+    assert [(d["name"], d["direction"]) for d in dissents] == [
+        ("James Bullard", "lower"),
+        ("Esther L. George", "maintain"),
+        ("Eric S. Rosengren", "maintain"),
+    ]
+    assert all(d["meeting_date"] == date(2019, 9, 18) for d in dissents)
+
+
+def test_dissents_row_count_matches_vote_against():
+    meetings, _, _, dissents = build_rows(_docs("20190918"))
+    assert meetings[0]["vote_against"] == len(dissents)
+
+
+def test_a_unanimous_meeting_writes_no_dissent_rows():
+    _, _, _, dissents = build_rows(_docs("20211215"))
+    assert dissents == []
+
+
+def test_dissent_row_count_mismatch_raises(monkeypatch):
+    """The cross-check invariant: dissents.csv rows for a meeting must equal
+    that meeting's vote_against, or the two tables could silently disagree.
+    Forces a mismatch by stubbing parse_dissent to under-report."""
+    from fomc_diff import backfill
+
+    monkeypatch.setattr(backfill, "parse_dissent", lambda clause: [("Only One", "lower")])
+    with pytest.raises(FomcParseError, match="vote_against"):
+        build_rows(_docs("20190918"))
 
 
 # --- run()'s year-contiguity guard ----------------------------------------

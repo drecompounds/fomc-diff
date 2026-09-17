@@ -37,7 +37,10 @@ from .errors import FomcParseError
 from .fetch import fetch
 from .parse import parse_statement
 from .diffing import diff_statements
-from .meetings import parse_vote, parse_target_range, derive_decision
+from .meetings import (
+    parse_vote, parse_target_range, derive_decision, dissent_clause,
+    parse_dissent,
+)
 from .tables import write_table
 
 MEETINGS_FIELDS = [
@@ -49,6 +52,7 @@ DIFFS_FIELDS = [
     "from_date", "to_date", "role", "change_type",
     "words_added", "words_removed", "word_diff",
 ]
+DISSENTS_FIELDS = ["meeting_date", "name", "direction"]
 MANIFEST_FIELDS = ["meeting_date", "url", "content_sha256", "fetched_at", "from_cache"]
 
 # The FOMC raised to 0.25-0.50 percent on 2015-12-16, the meeting before this
@@ -59,18 +63,24 @@ SEED_PRIOR_UPPER = 0.50
 
 def build_rows(
     documents: dict[date, str],
-) -> tuple[list[dict], list[dict], list[dict]]:
-    """Turn `{date: html}` into `(meetings, statements, diffs)` rows.
+) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
+    """Turn `{date: html}` into `(meetings, statements, diffs, dissents)` rows.
 
     A statement is `operational` when it has a `directive` paragraph and no
     `policy` paragraph (e.g. 2019-10-11, 2020-03-23); otherwise `decision`.
     Only `decision` rows require a vote and a target range -- and a
     `decision` row with no `policy` paragraph raises rather than writing a
     row with empty columns.
+
+    `dissents` carries one row per dissenter, per decision meeting. Its row
+    count for a meeting is enforced equal to that meeting's `vote_against` --
+    a mismatch raises `FomcParseError` rather than shipping two tables that
+    silently disagree.
     """
     dates = sorted(documents)
     meetings: list[dict] = []
     statements: list[dict] = []
+    dissents: list[dict] = []
     paras_by_date: dict[date, list] = {}
     # Seeded, not None: derive_decision refuses to default "no prior meeting"
     # to "hold". 2016-01-27 (this corpus's first meeting) comes out "hold"
@@ -121,6 +131,21 @@ def build_rows(
         decision = derive_decision(prev_decision_upper, target_upper)
         prev_decision_upper = target_upper
 
+        clause = dissent_clause(paras)
+        dissent_rows = parse_dissent(clause) if clause is not None else []
+        if len(dissent_rows) != vote_against:
+            raise FomcParseError(
+                f"{d}: dissents.csv would carry {len(dissent_rows)} row(s) "
+                f"for this meeting but vote_against is {vote_against}; these "
+                "two counts must match, or one of them is wrong"
+            )
+        for name, direction in dissent_rows:
+            dissents.append({
+                "meeting_date": d,
+                "name": name,
+                "direction": direction,
+            })
+
         meetings.append({
             "meeting_date": d,
             "statement_type": statement_type,
@@ -144,7 +169,7 @@ def build_rows(
                 "word_diff": row.word_diff,
             })
 
-    return meetings, statements, diffs
+    return meetings, statements, diffs, dissents
 
 
 def _content_hash(html: str) -> str:
@@ -202,11 +227,12 @@ def run(cache_dir: Path, out_dir: Path, *, current_year: int) -> None:
             "from_cache": res.from_cache,
         })
 
-    meetings, statements, diffs = build_rows(documents)
+    meetings, statements, diffs, dissents = build_rows(documents)
 
     write_table(out_dir / "meetings.csv", MEETINGS_FIELDS, meetings)
     write_table(out_dir / "statements.csv", STATEMENTS_FIELDS, statements)
     write_table(out_dir / "diffs.csv", DIFFS_FIELDS, diffs)
+    write_table(out_dir / "dissents.csv", DISSENTS_FIELDS, dissents)
     write_table(out_dir / "manifest.csv", MANIFEST_FIELDS, manifest)
 
 
