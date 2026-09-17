@@ -1,0 +1,35 @@
+What followed a dissent, 2016-2026
+==============================================================
+
+87 decision meetings, 45 dissenting votes.
+26 carry a directional preference and are scored; 19 do not (42% of the sample).
+
+horizon  dissent ->  move   n  hits   rate   base   lift
+--------------------------------------------------------------
+      1    lower ->   cut  13     7   54%   13%  +41%
+      1    raise ->  hike  13     7   54%   23%  +31%
+
+      2    lower ->   cut  13     7   54%   18%  +36%
+      2    raise ->  hike  10     7   70%   35%  +35%
+
+      3    lower ->   cut  13     7   54%   23%  +31%
+      3    raise ->  hike  10     8   80%   39%  +41%
+
+      4    lower ->   cut  12     7   58%   27%  +32%
+      4    raise ->  hike  10     8   80%   43%  +37%
+
+n is the number of DISSENTING OFFICIALS with a full lookahead --
+not independent meetings, and not independent people.
+
+How concentrated the sample is:
+   lower: 13 votes from 5 officials across 5 years; Stephen I. Miran is 6 of 13 (46%)
+   raise: 13 votes from 7 officials across 3 years; Esther L. George is 6 of 13 (46%)
+  the whole scored sample comes from 19 distinct meetings
+
+Read this as description, not evidence:
+  - 87 decision meetings, 31 rate changes, 27 with at least one dissent.
+  - Longest run of identical decisions: 15 meetings. Regime switches: 29.
+  - Meetings are not independent observations; the effective sample is nearer 29 than 87.
+  - Dissents cluster by person and era -- five of 2016's are largely one official.
+  - This is descriptive, not a test. No p-values, no significance claims.
+  - A null result is the expected outcome and is published as readily as any other.
