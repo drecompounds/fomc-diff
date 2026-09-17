@@ -2,7 +2,7 @@ from pathlib import Path
 import pytest
 from fomc_diff.meetings import (
     parse_fraction, parse_vote, parse_target_range, parse_dissent,
-    derive_decision,
+    derive_decision, MeetingParseError,
 )
 
 FIX = Path(__file__).parent / "fixtures"
@@ -131,3 +131,48 @@ def test_titles_are_not_counted_as_voters():
 def test_counted_era_still_uses_the_printed_line():
     """2026 prints 'by a 9-3 vote'. That branch must not regress."""
     assert parse_vote(_html("statement_20260729.html")) == (9, 3)
+
+
+# --- Task 6: widen target-range parsing across eras ------------------------
+
+@pytest.mark.parametrize("name,expected", [
+    ("statement_20200129.html", (1.5, 1.75)),
+    ("statement_20200303.html", (1.0, 1.25)),
+    ("statement_20211215.html", (0.0, 0.25)),
+    ("statement_20250917.html", (4.0, 4.25)),
+    ("statement_20260916.html", (3.75, 4.0)),
+])
+def test_target_range_across_eras(name, expected):
+    """Two real causes, both measured. 2020-01-29 and 2025-09-17 write the
+    fraction with U+2011 NON-BREAKING HYPHEN, which the ASCII-only _NUM
+    rejects. 2026-09-16 is pure ASCII but carries '<strong> </strong>' INSIDE
+    the phrase, which breaks a regex run against raw HTML.
+
+    2021-12-15 (ZIRP, '0 to 1/4 percent') is in this list as a REGRESSION
+    guard: it already passes today, and the spec was wrong to blame it."""
+    assert parse_target_range(_html(name)) == expected
+
+
+def test_non_breaking_hyphen_is_read_as_a_fraction():
+    """Isolates cause 1 from cause 2, so a fix for one cannot appear to fix
+    both. U+2011 must parse identically to ASCII hyphen."""
+    from fomc_diff.meetings import parse_fraction
+    assert parse_fraction("1‑1/2") == 1.5
+    assert parse_fraction("1-1/2") == 1.5
+
+
+def test_inline_markup_inside_the_phrase_does_not_defeat_the_match():
+    """Isolates cause 2. This exact shape is live in the 2026-09-16 statement."""
+    html = ('<div id="article"><p>The Committee decided to raise the target '
+            'range for the federal funds rate by 1/4 percentage point'
+            '<strong> </strong>to 3-3/4<strong> </strong>to 4 percent.</p>'
+            '<p>Economic activity is expanding.</p>'
+            '<p>Inflation remains elevated.</p></div>')
+    assert parse_target_range(html) == (3.75, 4.0)
+
+
+def test_unparseable_range_raises_rather_than_returning_zero():
+    """A range of 0 to 0 is a plausible-looking wrong answer, and ZIRP makes it
+    look legitimate. Absence must raise."""
+    with pytest.raises(MeetingParseError):
+        parse_target_range("<html><body><p>No range here.</p></body></html>")

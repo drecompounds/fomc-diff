@@ -5,7 +5,7 @@ import html as _html
 import re
 
 from .errors import FomcParseError
-from .parse import parse_statement
+from .parse import ArticleContainerError, parse_statement
 
 
 class MeetingParseError(FomcParseError):
@@ -23,14 +23,18 @@ _DASH = r"[‐-―\-]"
 _VOTE = re.compile(rf"by a (\d+)\s*{_DASH}\s*(\d+)\s*vote", re.I)
 # Matches a whole number ("5"), a whole-plus-fraction ("3-1/2"), or a bare
 # fraction ("1/4") — the last is required for ZIRP-era statements
-# (2008-2015), which read "...at 0 to 1/4 percent".
-_NUM = r"\d+-\d+/\d+|\d+/\d+|\d+"
+# (2008-2015), which read "...at 0 to 1/4 percent". The whole-plus-fraction
+# form reuses _DASH: the Fed writes "1<U+2011>1/2" as often as "1-1/2",
+# sometimes both in the same sentence.
+_NUM = rf"\d+{_DASH}\d+/\d+|\d+/\d+|\d+"
 # A hold reads "...federal funds rate AT x to y percent"; a hike or cut reads
 # "...federal funds rate BY 1/4 percentage point TO x to y percent". Both must
-# parse, or every meeting that actually moved rates is unreadable.
+# parse, or every meeting that actually moved rates is unreadable. 2020-03-03
+# additionally writes a comma before "to" ("...percentage point, to 1 to
+# 1-1/4 percent"), so the optional comma must be allowed here too.
 _RANGE = re.compile(
     rf"target range for the federal funds rate\s+"
-    rf"(?:by\s+[\d/\- ]+percentage\s+points?\s+)?"
+    rf"(?:by\s+[\d/\- ]+percentage\s+points?,?\s+)?"
     rf"(?:at|to)\s+({_NUM})\s+to\s+({_NUM})\s+percent",
     re.I)
 _DISSENT = re.compile(r"were (.+?), who (.+)$", re.S)
@@ -72,12 +76,17 @@ def _count_dissenters(segment: str) -> int:
 
 def parse_fraction(s: str) -> float:
     """'3-1/2' -> 3.5. '1/4' -> 0.25 (bare fraction). Plain integers pass
-    through."""
+    through.
+
+    Splits on _DASH, not a bare ASCII "-": the Fed writes the whole/fraction
+    separator as U+2011 (non-breaking hyphen) as often as ASCII, sometimes
+    both in one sentence ("at 1-1/2 to 1-3/4 percent").
+    """
     s = s.strip()
     if "/" not in s:
         return float(s)
-    if "-" in s:
-        whole, frac = s.split("-", 1)
+    if re.search(_DASH, s):
+        whole, frac = re.split(_DASH, s, maxsplit=1)
     else:
         whole, frac = "0", s
     num, den = frac.split("/")
@@ -124,7 +133,21 @@ def parse_vote(html: str) -> tuple[int, int]:
 
 
 def parse_target_range(text: str) -> tuple[float, float]:
-    m = _RANGE.search(text)
+    """Accepts raw HTML or plain text.
+
+    Raw HTML is routed through parse_statement first: the Fed puts
+    "<strong> </strong>" INSIDE the phrase (live in the 2026-09-16 statement),
+    and a regex run against raw markup cannot match across it.
+    """
+    haystack = text
+    if "<" in text:
+        try:
+            paras = parse_statement(text)
+        except ArticleContainerError:
+            paras = []
+        haystack = " ".join(
+            p.text for p in paras if p.role in ("policy", "directive")) or text
+    m = _RANGE.search(haystack)
     if not m:
         raise MeetingParseError("no target range found")
     return parse_fraction(m.group(1)), parse_fraction(m.group(2))
