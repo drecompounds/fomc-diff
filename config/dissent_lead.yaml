@@ -1,0 +1,42 @@
+# Pre-registered analysis rule: what follows a dissent?
+#
+# THIS FILE IS COMMITTED BEFORE ANY RESULT IS COMPUTED. Its git history is the
+# evidence. If a later commit changes these values, that commit must say why,
+# and every previously published number must be recomputed and republished --
+# not quietly replaced.
+#
+# The purpose of pre-registering is to stop the obvious failure: trying several
+# horizons, finding one that looks impressive, and reporting only that. Every
+# horizon listed here is reported, always, whatever it shows.
+
+horizons: [1, 2, 3, 4]        # meetings ahead; ALL are reported, no subset
+
+# A dissent is "followed by a move in its direction" when:
+scoring:
+  lower: cut                  # a dissenter preferring to lower, followed by a cut
+  raise: hike                 # a dissenter preferring to raise, followed by a hike
+  # `maintain` and `unclear` are NOT scored. A dissenter who wanted no change,
+  # or whose objection was to the statement's language rather than the rate,
+  # has no directional prediction to check. They are counted and reported
+  # separately so the reader can see how much of the sample is unscored.
+
+unit: dissenter               # one observation per dissenting official, not per
+                              # meeting -- a 3-dissent meeting split 1 lower /
+                              # 2 maintain is not one hawkish observation
+
+baseline: unconditional       # compare against the rate of cut/hike over ALL
+                              # decision meetings in the same horizon, so the
+                              # table shows lift over the base rate rather than
+                              # a bare percentage that looks meaningful alone
+
+# Constraints on interpretation, to be printed WITH the output, not buried:
+caveats:
+  - "87 decision meetings, 31 rate changes, 27 with at least one dissent."
+  - "Longest run of identical decisions: 15 meetings. Regime switches: 29."
+  - "Meetings are not independent observations; the effective sample is nearer
+     29 than 87."
+  - "Dissents cluster by person and era -- five of 2016's are largely one
+     official."
+  - "This is descriptive, not a test. No p-values, no significance claims."
+  - "A null result is the expected outcome and is published as readily as any
+     other."
