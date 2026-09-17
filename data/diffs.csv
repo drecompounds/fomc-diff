@@ -509,12 +509,12 @@ from_date,to_date,role,change_type,words_added,words_removed,word_diff
 2026-04-29,2026-06-17,vote_for,removed,0,97,"[-Voting for the monetary policy action were Jerome H. Powell, Chair; John C. Williams, Vice Chair; Michael S. Barr; Michelle W. Bowman; Lisa D. Cook; Philip N. Jefferson; Anna Paulson; and Christopher J. Waller. Voting against this action were Stephen I. Miran, who preferred to lower the target range for the federal funds rate by 1/4 percentage point at this meeting; and Beth M. Hammack, Neel Kashkari, and Lorie K. Logan, who supported maintaining the target range for the federal funds rate but did not support inclusion of an easing bias in the statement at this time.-]"
 2026-04-29,2026-06-17,vote,added,17,0,[+The Federal Open Market Committee approved the following statement for release by a 12 – 0 vote:+]
 2026-04-29,2026-06-17,inflation,added,31,0,"[+Inflation remains elevated relative to the Committee's 2 percent goal, in part reflecting supply shocks that have driven price increases in certain sectors, including energy. The Committee will deliver price stability.+]"
-2026-06-17,2026-07-29,vote,changed,3,3,[-12 – 0-] [+9 â 3+]
+2026-06-17,2026-07-29,vote,changed,2,2,[-12-] [+9+] [-0-] [+3+]
 2026-06-17,2026-07-29,policy,changed,2,1,[-reaffirmed-] [+is continuing+]
 2026-06-17,2026-07-29,economy,unchanged,0,0,
 2026-06-17,2026-07-29,inflation,unchanged,0,0,
 2026-06-17,2026-07-29,vote_against,added,35,0,"[+Voting against the monetary policy action were Beth M. Hammack, Neel Kashkari, and Lorie K. Logan, who preferred to raise the target range for the federal funds rate by 1/4 percentage point at this meeting.+]"
-2026-07-29,2026-09-16,vote,changed,3,3,[-9 â 3-] [+12 – 0+]
+2026-07-29,2026-09-16,vote,changed,2,2,[-9-] [+12+] [-3-] [+0+]
 2026-07-29,2026-09-16,policy,changed,7,3,[-maintain-] [+raise+] [-at 3-1/2-] [+by 1/4 percentage point+] [+to 4+]
 2026-07-29,2026-09-16,economy,changed,16,13,"[-pace despite-] [+pace. While uncertainty remains+] [-uncertainty that owes,-] [+owing,+] [-the conflict in the Middle East.-] [+geopolitical developments, domestic spending has been resilient.+] [+is strong,+] [-are strong.-] [+is robust.+]"
 2026-07-29,2026-09-16,inflation,changed,10,18,"[-elevated relative-] [+elevated. Today's policy action will support a timelier return+] [-goal, in part reflecting supply shocks that have driven price increases in certain sectors, including energy.-] [+goal.+]"
