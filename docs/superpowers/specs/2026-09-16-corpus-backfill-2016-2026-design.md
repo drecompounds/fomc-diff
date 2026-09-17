@@ -214,7 +214,10 @@ raises.
 
 ## Defect 6 - the target range parser reads raw HTML
 
-`parse_target_range` fails on 15 of 89, for two measured causes.
+`parse_target_range` fails on 15 of 89, for three measured causes. (This spec
+said "two" until implementation found the third; the count of causes was
+itself guessed rather than measured -- the same error documented elsewhere
+in this spec.)
 
 1. **U+2011 NON-BREAKING HYPHEN** in fractions. The Fed writes "4‑1/4" with
    U+2011, not ASCII hyphen, and mixes the two inside a single sentence
@@ -224,6 +227,10 @@ raises.
    the 2026-09-16 statement reads `rate by 1/4 percentage point<strong>
    </strong>to 3-3/4<strong> </strong>to 4 percent`. The text is pure ASCII; the
    tags alone defeat the match.
+
+3. **A comma inside the by-clause.** 2020-03-03 reads "by 1/2 percentage
+   point**,** to 1 to 1-1/4 percent". Unrelated to dashes or markup; found
+   during implementation, not during design.
 
 Cause 2 is the **third instance of one defect class**: structured extraction run
 against raw HTML instead of cleaned paragraph text. `parse_vote` needed
